@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhishGuard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- ── HEADER ────────────────────────────────────── -->
+  <header class="header">
+    <div class="logo-wrap">
+      <svg class="shield-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L3 6v6c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V6L12 2Z"
+              fill="url(#shieldGrad)" stroke="none"/>
+        <path d="M9 12l2 2 4-4" stroke="#0d1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <defs>
+          <linearGradient id="shieldGrad" x1="3" y1="2" x2="21" y2="23.35" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#00d4aa"/>
+            <stop offset="1" stop-color="#0099cc"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span class="brand">PhishGuard</span>
+    </div>
+    <span class="version-tag">CYB02 · SIH 2026</span>
+  </header>
+
+  <!-- ── MAIN CONTENT ──────────────────────────────── -->
+  <main class="card">
+
+    <!-- Target Website Info -->
+    <div class="site-info">
+      <div class="site-label">Analyzed Target</div>
+      <div class="site-domain" id="siteDomain">—</div>
+      <div class="site-url" id="siteUrl">Reading target URL…</div>
+    </div>
+
+    <!-- Risk Summary Row -->
+    <div class="risk-badge-wrap">
+      <div class="risk-badge scanning" id="riskBadge">
+        <span class="badge-dot"></span>
+        <span class="badge-text" id="riskLabel">Analyzing…</span>
+      </div>
+      <div class="risk-score" id="riskScore">
+        <span class="score-num" id="scoreNum">0</span>
+        <span class="score-label">Risk Score</span>
+      </div>
+    </div>
+
+    <!-- Animated Score Progress Meter -->
+    <div class="score-bar-bg">
+      <div class="score-bar-fill" id="scoreBarFill"></div>
+    </div>
+
+    <!-- Dynamic Warning Banner / Advisory Box -->
+    <div class="warning-banner safe" id="warningBanner">
+      <div class="banner-icon" id="bannerIcon">✓</div>
+      <div class="banner-content">
+        <div class="banner-title" id="bannerTitle">Standard Webpage</div>
+        <div class="banner-desc" id="bannerDesc">Evaluating URL signals…</div>
+      </div>
+    </div>
+
+    <!-- High-Risk Safety Action Block (Shown on High Risk) -->
+    <div class="safety-actions hidden" id="safetyActions">
+      <button class="btn btn-leave-safety" id="btnReturnSafety">
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 2a8 8 0 100 16A8 8 0 0010 2Zm1 11H9v-2h2v2Zm0-4H9V5h2v4Z" fill="currentColor"/>
+        </svg>
+        Leave Page (Return to Safety)
+      </button>
+      <button class="btn-link-proceed" id="btnProceedAnyway">
+        I understand the risks, continue anyway
+      </button>
+    </div>
+
+    <!-- Collapsible Diagnostic Section -->
+    <div class="diagnostic-toggle-wrap">
+      <button class="diagnostic-toggle-btn" id="btnToggleDiagnostics" aria-expanded="true">
+        <span id="diagnosticTitle">Diagnostic Indicators (0)</span>
+        <svg class="chevron-icon" id="chevronIcon" viewBox="0 0 20 20" fill="none" width="14" height="14">
+          <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="diagnostic-collapse" id="diagnosticCollapse">
+      <ul class="reasons-list" id="reasonsList"></ul>
+    </div>
+
+  </main>
+
+  <!-- ── FOOTER FEEDBACK ────────────────────────────── -->
+  <footer class="footer">
+    <button class="btn btn-report" id="btnReport" title="Report this site as a phishing threat">
+      <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+        <path d="M10 2a8 8 0 100 16A8 8 0 0010 2Zm0 4v4m0 4h.01" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      Report Threat
+    </button>
+    <button class="btn btn-safe" id="btnSafe" title="Mark this site as safe">
+      <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+        <path d="M7 10l2 2 4-4m3 2a8 8 0 11-16 0 8 8 0 0116 0Z" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      Mark Safe
+    </button>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
