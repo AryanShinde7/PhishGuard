@@ -3,12 +3,14 @@
  *
  * POST /api/analyze
  * Accepts a URL (and optional DOM signals) from the extension,
- * runs server-side heuristic analysis, and returns the risk result.
- * Persists the detection to MongoDB (Phase 7).
+ * runs server-side heuristic analysis, queries the Python ML microservice (port 5001),
+ * fuses heuristic + ML predictions into a hybrid ensemble score, and persists to MongoDB.
  */
 
 const { body, validationResult } = require('express-validator');
 const Detection = require('../models/Detection');
+
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:5001';
 
 // ── Validation Rules ──────────────────────────────────────────────────────────
 const analyzeValidation = [
@@ -19,7 +21,7 @@ const analyzeValidation = [
   body('domSignals').optional().isObject().withMessage('domSignals must be an object.')
 ];
 
-// ── Inline scoring weights (mirrors riskEngine.js — stays in sync) ────────────
+// ── Inline scoring weights (mirrors riskEngine.js) ────────────────────────────
 const WEIGHTS = {
   BRAND_IMPERSONATION: 20, IP_HOST: 20, AT_SYMBOL: 20,
   INSECURE_HTTP: 15, PUNYCODE_HOMOGRAPH: 15,
@@ -47,6 +49,30 @@ function scoreFlags(urlFlags = [], domFlags = []) {
   return { score, level, breakdown };
 }
 
+// ── Helper: Query Python ML Microservice ─────────────────────────────────────
+async function queryMlService(url, domSignals) {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1200); // 1.2s timeout
+
+    const response = await fetch(`${ML_SERVICE_URL}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, domSignals }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return null;
+    const json = await response.json();
+    return json.success ? json.prediction : null;
+  } catch (err) {
+    // Graceful fallback when Python ML service is offline
+    return null;
+  }
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 async function analyzeUrl(req, res) {
   const errors = validationResult(req);
@@ -65,38 +91,64 @@ async function analyzeUrl(req, res) {
     }
 
     const domain = parsedUrl.hostname.toLowerCase();
-    const { score, level, breakdown } = scoreFlags(urlFlags, domFlags);
+    
+    // 1. Calculate Rule-Based Heuristics
+    const { score: ruleScore, level: ruleLevel, breakdown } = scoreFlags(urlFlags, domFlags);
 
-    // Persist to MongoDB (Phase 7)
+    // 2. Query ML Microservice (Phase 9)
+    const mlResult = await queryMlService(url, domSignals);
+
+    // 3. Ensemble Hybrid Score (Weighted: 50% Rules + 50% ML Model if available)
+    let finalScore = ruleScore;
+    let finalLevel = ruleLevel;
+
+    if (mlResult) {
+      const mlScore = mlResult.riskScore;
+      // High-confidence ensemble blending
+      finalScore = Math.min(100, Math.max(0, Math.round(0.5 * ruleScore + 0.5 * mlScore)));
+      finalLevel = finalScore > 60 ? 'HIGH RISK' : finalScore > 30 ? 'SUSPICIOUS' : 'SAFE';
+    }
+
+    // 4. Persist to MongoDB (Phase 7)
     let saved = null;
     try {
       saved = await Detection.create({
         url,
         domain,
-        riskScore: score,
-        riskLevel: level,
+        riskScore: finalScore,
+        riskLevel: finalLevel,
         urlFlags,
         domFlags,
         reasons,
-        features: domSignals?.features || {},
+        features: {
+          ...(domSignals?.features || {}),
+          mlProbability: mlResult?.probability ?? null,
+          mlConfidence: mlResult?.confidence ?? null
+        },
         source: 'extension'
       });
     } catch (dbErr) {
-      // Non-blocking — API still responds even if DB is temporarily unavailable
       console.warn('[analyzeController] DB write skipped:', dbErr.message);
     }
 
     const detectionResult = {
-      id:         saved?._id || null,
+      id:          saved?._id || null,
       url,
       domain,
-      riskScore:  score,
-      riskLevel:  level,
+      riskScore:   finalScore,
+      riskLevel:   finalLevel,
       urlFlags,
       domFlags,
       reasons,
       breakdown,
-      analyzedAt: new Date().toISOString()
+      mlAnalysis:  mlResult ? {
+        probability: mlResult.probability,
+        isPhishing: mlResult.isPhishing,
+        confidence: mlResult.confidence,
+        factors: mlResult.factors,
+        model: mlResult.model
+      } : { status: 'offline', fallback: 'rule-based heuristics' },
+      analyzedAt:  new Date().toISOString()
     };
 
     return res.status(200).json({ success: true, data: detectionResult });

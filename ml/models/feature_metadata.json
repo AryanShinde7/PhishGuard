@@ -1,0 +1,90 @@
+{
+  "model_type": "RandomForestClassifier",
+  "version": "1.0.0",
+  "n_features": 33,
+  "features": [
+    "url_len",
+    "hostname_len",
+    "path_len",
+    "query_len",
+    "count_dots",
+    "count_hyphens",
+    "count_at",
+    "count_question",
+    "count_equal",
+    "count_slash",
+    "count_percent",
+    "count_digits",
+    "digits_ratio",
+    "letters_ratio",
+    "has_ip",
+    "is_https",
+    "is_punycode",
+    "subdomain_count",
+    "has_excessive_subdomains",
+    "has_excessive_hyphens",
+    "url_entropy",
+    "hostname_entropy",
+    "matched_keywords",
+    "is_high_risk_tld",
+    "brand_impersonation",
+    "has_password_field",
+    "has_login_form",
+    "cross_domain_form",
+    "http_form_action",
+    "hidden_inputs_count",
+    "urgency_language",
+    "external_link_ratio",
+    "suspicious_scripts"
+  ],
+  "metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "roc_auc": 1.0,
+    "cv_f1_mean": 1.0
+  },
+  "top_features": [
+    {
+      "feature": "matched_keywords",
+      "importance": 0.1097
+    },
+    {
+      "feature": "is_https",
+      "importance": 0.1068
+    },
+    {
+      "feature": "is_high_risk_tld",
+      "importance": 0.1032
+    },
+    {
+      "feature": "has_excessive_hyphens",
+      "importance": 0.091
+    },
+    {
+      "feature": "subdomain_count",
+      "importance": 0.076
+    },
+    {
+      "feature": "hostname_len",
+      "importance": 0.0696
+    },
+    {
+      "feature": "hostname_entropy",
+      "importance": 0.0567
+    },
+    {
+      "feature": "external_link_ratio",
+      "importance": 0.0495
+    },
+    {
+      "feature": "count_dots",
+      "importance": 0.0425
+    },
+    {
+      "feature": "http_form_action",
+      "importance": 0.0405
+    }
+  ]
+}
