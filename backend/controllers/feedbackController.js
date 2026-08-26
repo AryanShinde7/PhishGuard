@@ -3,11 +3,11 @@
  *
  * POST /api/feedback
  * Accepts user feedback on the accuracy of a PhishGuard detection.
- * Types: 'suspicious' | 'safe' | 'false_positive' | 'false_negative'
- * This data will train and calibrate the ML model in Phase 9.
+ * Phase 7: Persists feedback to MongoDB Feedback collection.
  */
 
 const { body, validationResult } = require('express-validator');
+const Feedback = require('../models/Feedback');
 
 // ── Validation ────────────────────────────────────────────────────────────────
 const feedbackValidation = [
@@ -46,33 +46,43 @@ async function submitFeedback(req, res) {
       return res.status(400).json({ success: false, error: 'Malformed URL.' });
     }
 
-    const feedback = {
-      url,
-      domain,
-      feedbackType,
-      riskScore,
-      riskLevel,
-      comment,
-      submittedAt: new Date().toISOString()
-    };
-
-    // Phase 7: Persist to MongoDB
-    // const Feedback = require('../models/Feedback');
-    // await Feedback.create(feedback);
+    // Persist to MongoDB (Phase 7)
+    let saved = null;
+    try {
+      saved = await Feedback.create({
+        url,
+        domain,
+        feedbackType,
+        riskScore,
+        riskLevel,
+        comment
+      });
+    } catch (dbErr) {
+      console.warn('[feedbackController] DB write skipped:', dbErr.message);
+    }
 
     console.log(`[PhishGuard] Feedback received: "${feedbackType}" for ${domain}`);
 
     const messages = {
       suspicious:      'Thanks! This site has been flagged for review.',
-      safe:            'Got it — we\'ve noted this as a safe page.',
-      false_positive:  'Thanks for the correction. We\'ll improve our detection.',
-      false_negative:  'Thanks for flagging this phishing site we missed!'
+      safe:            "Got it — we've noted this as a safe page.",
+      false_positive:  "Thanks for the correction. We'll improve our detection.",
+      false_negative:  "Thanks for flagging this phishing site we missed!"
     };
 
     return res.status(201).json({
       success: true,
       message: messages[feedbackType] || 'Feedback received.',
-      data: feedback
+      data: {
+        id: saved?._id || null,
+        url,
+        domain,
+        feedbackType,
+        riskScore,
+        riskLevel,
+        comment,
+        submittedAt: new Date().toISOString()
+      }
     });
 
   } catch (err) {

@@ -3,10 +3,11 @@
  *
  * POST /api/report
  * Accepts a user-initiated phishing report from the extension popup.
- * Stores in MongoDB as a Detection with source='extension', high-risk flag.
+ * Phase 7: Persists report to MongoDB as a Detection document.
  */
 
 const { body, validationResult } = require('express-validator');
+const Detection = require('../models/Detection');
 
 // ── Validation Rules ──────────────────────────────────────────────────────────
 const reportValidation = [
@@ -50,7 +51,25 @@ async function submitReport(req, res) {
       return res.status(400).json({ success: false, error: 'Malformed URL.' });
     }
 
+    // Persist to MongoDB (Phase 7)
+    let saved = null;
+    try {
+      saved = await Detection.create({
+        url,
+        domain,
+        riskScore:  riskScore ?? 50,
+        riskLevel:  riskLevel || 'SUSPICIOUS',
+        urlFlags,
+        domFlags,
+        reasons,
+        source: 'extension'
+      });
+    } catch (dbErr) {
+      console.warn('[reportController] DB write skipped:', dbErr.message);
+    }
+
     const report = {
+      id:         saved?._id || null,
       url,
       domain,
       riskScore,
@@ -61,10 +80,6 @@ async function submitReport(req, res) {
       comment,
       reportedAt: new Date().toISOString()
     };
-
-    // Phase 7: Persist to MongoDB
-    // const Detection = require('../models/Detection');
-    // await Detection.create({ url, domain, riskScore, riskLevel, urlFlags, domFlags, reasons, source: 'extension' });
 
     console.log(`[PhishGuard] New user report: ${domain} (${riskLevel})`);
 

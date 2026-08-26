@@ -2,12 +2,14 @@
  * controllers/detectionsController.js — Detection History Handler
  *
  * GET /api/detections          — paginated list of all detections
- * GET /api/detections/:domain  — detections for a specific domain
+ * GET /api/detections/:domain  — detection history for a specific domain
  *
- * Phase 7: Real MongoDB queries replace the stubs below.
+ * Phase 7: Real MongoDB queries.
  */
 
 const { query, param, validationResult } = require('express-validator');
+const Detection = require('../models/Detection');
+const mongoose  = require('mongoose');
 
 // ── Validation ────────────────────────────────────────────────────────────────
 const listValidation = [
@@ -25,21 +27,32 @@ async function getAllDetections(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
 
-  const page  = parseInt(req.query.page  || '1', 10);
+  const page  = parseInt(req.query.page  || '1',  10);
   const limit = parseInt(req.query.limit || '20', 10);
   const level = req.query.level || null;
 
   try {
-    // Phase 7: MongoDB query
-    // const filter = level ? { riskLevel: level } : {};
-    // const [detections, total] = await Promise.all([
-    //   Detection.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-    //   Detection.countDocuments(filter)
-    // ]);
+    const isDbConnected = mongoose.connection.readyState === 1;
+    if (!isDbConnected) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        pagination: { total: 0, page, limit, totalPages: 0 },
+        note: 'Connect MongoDB to see detection history.'
+      });
+    }
 
-    // Phase 6 stub — empty result set
-    const detections = [];
-    const total = 0;
+    const filter = level ? { riskLevel: level } : {};
+    const [detections, total] = await Promise.all([
+      Detection
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select('-features')   // Exclude large features object from list
+        .lean(),
+      Detection.countDocuments(filter)
+    ]);
 
     return res.status(200).json({
       success: true,
@@ -49,8 +62,7 @@ async function getAllDetections(req, res) {
         page,
         limit,
         totalPages: Math.ceil(total / limit)
-      },
-      note: 'Live data available after Phase 7 (MongoDB) is connected.'
+      }
     });
 
   } catch (err) {
@@ -67,19 +79,38 @@ async function getDetectionsByDomain(req, res) {
   const domain = req.params.domain.toLowerCase();
 
   try {
-    // Phase 7: MongoDB query
-    // const detections = await Detection.find({ domain }).sort({ createdAt: -1 }).limit(50).lean();
+    const isDbConnected = mongoose.connection.readyState === 1;
+    if (!isDbConnected) {
+      return res.status(200).json({
+        success: true,
+        domain,
+        data: [],
+        note: 'Connect MongoDB to see domain history.'
+      });
+    }
 
-    // Phase 6 stub
+    const detections = await Detection
+      .find({ domain })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    // Compute domain risk summary
+    const totalHits   = detections.length;
+    const highRisk    = detections.filter(d => d.riskLevel === 'HIGH RISK').length;
+    const avgScore    = totalHits > 0
+      ? Math.round(detections.reduce((s, d) => s + d.riskScore, 0) / totalHits)
+      : 0;
+
     return res.status(200).json({
       success: true,
       domain,
-      data: [],
-      note: 'Live data available after Phase 7 (MongoDB) is connected.'
+      summary: { totalHits, highRisk, avgScore },
+      data: detections
     });
 
   } catch (err) {
-    console.error('[detectionsController] Error:', err.message);
+    console.error('[detectionsController] Domain lookup error:', err.message);
     return res.status(500).json({ success: false, error: 'Failed to retrieve detections for domain.' });
   }
 }

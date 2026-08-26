@@ -4,10 +4,11 @@
  * POST /api/analyze
  * Accepts a URL (and optional DOM signals) from the extension,
  * runs server-side heuristic analysis, and returns the risk result.
- * Also persists the detection to MongoDB (once Phase 7 is connected).
+ * Persists the detection to MongoDB (Phase 7).
  */
 
 const { body, validationResult } = require('express-validator');
+const Detection = require('../models/Detection');
 
 // ── Validation Rules ──────────────────────────────────────────────────────────
 const analyzeValidation = [
@@ -48,7 +49,6 @@ function scoreFlags(urlFlags = [], domFlags = []) {
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 async function analyzeUrl(req, res) {
-  // Validate input
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ success: false, errors: errors.array() });
@@ -65,15 +65,33 @@ async function analyzeUrl(req, res) {
     }
 
     const domain = parsedUrl.hostname.toLowerCase();
-
-    // Score the flags sent from the extension
     const { score, level, breakdown } = scoreFlags(urlFlags, domFlags);
 
+    // Persist to MongoDB (Phase 7)
+    let saved = null;
+    try {
+      saved = await Detection.create({
+        url,
+        domain,
+        riskScore: score,
+        riskLevel: level,
+        urlFlags,
+        domFlags,
+        reasons,
+        features: domSignals?.features || {},
+        source: 'extension'
+      });
+    } catch (dbErr) {
+      // Non-blocking — API still responds even if DB is temporarily unavailable
+      console.warn('[analyzeController] DB write skipped:', dbErr.message);
+    }
+
     const detectionResult = {
+      id:         saved?._id || null,
       url,
       domain,
-      riskScore: score,
-      riskLevel: level,
+      riskScore:  score,
+      riskLevel:  level,
       urlFlags,
       domFlags,
       reasons,
@@ -81,14 +99,7 @@ async function analyzeUrl(req, res) {
       analyzedAt: new Date().toISOString()
     };
 
-    // Phase 7: Persist to MongoDB
-    // const Detection = require('../models/Detection');
-    // await Detection.create({ url, domain, riskScore: score, riskLevel: level, urlFlags, domFlags, reasons });
-
-    return res.status(200).json({
-      success: true,
-      data: detectionResult
-    });
+    return res.status(200).json({ success: true, data: detectionResult });
 
   } catch (err) {
     console.error('[analyzeController] Error:', err.message);

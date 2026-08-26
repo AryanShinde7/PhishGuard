@@ -3,15 +3,19 @@
  *
  * Express REST API server for PhishGuard SIH 2026.
  * Phase 6: Core API routes (analyze, report, feedback, stats, detections).
- * Phase 7: MongoDB connection added.
+ * Phase 7: MongoDB Atlas connection via Mongoose.
  */
 
-const express  = require('express');
-const cors     = require('cors');
-const helmet   = require('helmet');
-const morgan   = require('morgan');
+const express    = require('express');
+const cors       = require('cors');
+const helmet     = require('helmet');
+const morgan     = require('morgan');
 const rateLimiter = require('./middleware/rateLimiter');
+const connectDB  = require('./config/db');
 require('dotenv').config();
+
+// ── Connect to MongoDB ────────────────────────────────────────────────────────────────
+connectDB();
 
 // Route imports
 const analyzeRoutes    = require('./routes/analyze');
