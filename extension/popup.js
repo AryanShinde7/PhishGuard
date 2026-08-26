@@ -102,12 +102,13 @@ function renderBreakdown(riskResult) {
 
   if (count === 0) {
     const li = document.createElement('li');
-    li.innerHTML = '<span class="reason-icon">🛡️</span><span>Clean baseline. No anomalous URL heuristics triggered.</span>';
+    li.innerHTML = '<span class="reason-icon">🛡️</span><span>Clean baseline. No anomalous URL or page heuristics triggered.</span>';
     reasonsList.appendChild(li);
     return;
   }
 
   const iconMap = {
+    // URL flags
     BRAND_IMPERSONATION: '🎭',
     IP_HOST: '🖧',
     AT_SYMBOL: '⚠️',
@@ -119,15 +120,32 @@ function renderBreakdown(riskResult) {
     EXCESSIVE_HYPHENS: '🔗',
     REDIRECT_IN_PATH: '🔀',
     LONG_URL: '📏',
-    LONG_HOSTNAME: '📏'
+    LONG_HOSTNAME: '📏',
+    // DOM flags
+    CROSS_DOMAIN_FORM: '📤',
+    PASSWORD_ON_HTTP: '🔑',
+    LOGIN_FORM_DETECTED: '📋',
+    HTTP_FORM_ACTION: '📬',
+    SUSPICIOUS_FORM_TLD: '🚩',
+    TITLE_BRAND_IMPERSONATION: '🎭',
+    URGENCY_LANGUAGE: '⚡',
+    SUSPICIOUS_EXTERNAL_SCRIPT: '📜',
+    EXTERNAL_IFRAME: '🖼️',
+    EXCESSIVE_HIDDEN_INPUTS: '👁️',
+    HIGH_EXTERNAL_LINK_RATIO: '🔗',
+    NO_FAVICON_WITH_LOGIN: '🖼️'
   };
 
   breakdown.forEach((item) => {
     const li = document.createElement('li');
     const icon = iconMap[item.flag] || '⚠️';
+    const sourceTag = item.source === 'dom'
+      ? '<span class="source-tag dom-tag">PAGE</span>'
+      : '<span class="source-tag url-tag">URL</span>';
     li.innerHTML = `
       <span class="reason-icon">${icon}</span>
       <span>${item.description.replace(/\(\+\d+\s+pts\)/, '')}</span>
+      ${sourceTag}
       <span class="pts-tag">+${item.points} pts</span>
     `;
     reasonsList.appendChild(li);
