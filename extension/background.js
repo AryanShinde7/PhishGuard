@@ -3,10 +3,12 @@
  *
  * Coordinates URL analysis, risk scoring, content script messaging, and popup requests.
  * Phase 5: Merges DOM signals from content.js into the risk score.
+ * Phase 6: Syncs evaluation results to the PhishGuard REST API backend.
  */
 
 import { analyzeUrl } from './urlAnalyzer.js';
 import { calculateRisk } from './riskEngine.js';
+import { syncAnalysisToBackend } from './apiClient.js';
 
 // In-memory cache for tab evaluations
 const tabDataCache = new Map();
@@ -40,6 +42,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       const evaluation = evaluateTabUrl(tab.url, domSignals);
       tabDataCache.set(tabId, { ...existing, ...evaluation });
       console.log(`[PhishGuard] Tab #${tabId} ${evaluation.domain} -> Score: ${evaluation.risk.score} (${evaluation.risk.level}) | URL: ${evaluation.risk.urlFlagCount} flags, DOM: ${evaluation.risk.domFlagCount} flags`);
+      // Phase 6: Sync to backend (non-blocking — won't break extension if backend is offline)
+      syncAnalysisToBackend(evaluation);
     }
   }
 });
