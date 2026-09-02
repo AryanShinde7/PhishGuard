@@ -9,17 +9,19 @@
 // Default weights — URL heuristics + DOM page signals
 export const DEFAULT_RISK_CONFIG = {
   weights: {
-    // ── URL Heuristic Flags (Phase 2) ──────────────────────────────────────
+    // ── URL Heuristic Flags (Phase 2) ──────────────────────────────────────────
     BRAND_IMPERSONATION: 20,       // Brand spoofed inside unauthorized domain
     IP_HOST: 20,                   // Direct IP address instead of domain
     AT_SYMBOL: 20,                 // '@' authority trickery
-    INSECURE_HTTP: 15,             // Unencrypted HTTP protocol
+    INSECURE_HTTP: 20,             // Unencrypted HTTP (raised: HTTP on any site is now riskier)
     PUNYCODE_HOMOGRAPH: 15,        // Punycode / IDN homograph attack
+    FREE_HOSTING_PLATFORM: 15,     // Anonymous hosting platform (netlify, azure blob, glitch, etc.)
     SUSPICIOUS_KEYWORDS: 10,       // Phishing trigger keywords (base)
     KEYWORD_MULTIPLE_BONUS: 5,     // Bonus for multiple keyword matches
-    SUSPICIOUS_TLD: 10,            // Abused / disposable TLD
+    SUSPICIOUS_TLD: 12,            // Abused / disposable TLD (raised)
     EXCESSIVE_SUBDOMAINS: 10,      // Deep subdomain chaining
     EXCESSIVE_HYPHENS: 10,         // Multiple hyphens in domain
+    NUMERIC_DOMAIN: 10,            // 5+ consecutive digits in domain (auto-generated)
     REDIRECT_IN_PATH: 10,          // Double-slash redirect
     LONG_URL: 5,                   // Abnormal URL length
     LONG_HOSTNAME: 5,              // Abnormal hostname length
@@ -39,8 +41,8 @@ export const DEFAULT_RISK_CONFIG = {
     NO_FAVICON_WITH_LOGIN: 5       // Login page with no favicon
   },
   thresholds: {
-    SAFE_MAX: 30,       // 0  – 30 : SAFE
-    SUSPICIOUS_MAX: 60, // 31 – 60 : SUSPICIOUS
+    SAFE_MAX: 20,       // 0  – 20 : SAFE  (lowered: tool is now more sensitive)
+    SUSPICIOUS_MAX: 60, // 21 – 60 : SUSPICIOUS
     HIGH_RISK_MIN: 61   // 61 – 100: HIGH RISK
   }
 };
@@ -140,12 +142,14 @@ function getFlagDescription(flag, analysisOrSignals) {
     case 'BRAND_IMPERSONATION':          return 'Brand Impersonation / Disguise (+20 pts)';
     case 'IP_HOST':                      return 'Raw IP Host (+20 pts)';
     case 'AT_SYMBOL':                    return 'Embedded @ Authority Symbol (+20 pts)';
-    case 'INSECURE_HTTP':                return 'Insecure HTTP Transport (+15 pts)';
+    case 'INSECURE_HTTP':                return 'Insecure HTTP Transport (+20 pts)';
     case 'PUNYCODE_HOMOGRAPH':           return 'Punycode Homograph Attack (+15 pts)';
+    case 'FREE_HOSTING_PLATFORM':        return 'Anonymous Free Hosting Platform (+15 pts)';
     case 'SUSPICIOUS_KEYWORDS':          return `Phishing Trigger Keywords (+${a.features?.matchedKeywords?.length > 1 ? 15 : 10} pts)`;
-    case 'SUSPICIOUS_TLD':               return `High-Risk TLD .${a.features?.tld || ''} (+10 pts)`;
+    case 'SUSPICIOUS_TLD':               return `High-Risk TLD .${a.features?.tld || ''} (+12 pts)`;
     case 'EXCESSIVE_SUBDOMAINS':         return 'Deep Subdomain Chaining (+10 pts)';
     case 'EXCESSIVE_HYPHENS':            return 'Excessive Domain Hyphens (+10 pts)';
+    case 'NUMERIC_DOMAIN':               return 'Suspicious Numeric Sequence in Domain (+10 pts)';
     case 'REDIRECT_IN_PATH':             return 'Open Redirect in Path (+10 pts)';
     case 'LONG_URL':                     return 'Abnormal URL Length (+5 pts)';
     case 'LONG_HOSTNAME':                return 'Abnormal Hostname Length (+5 pts)';
