@@ -106,3 +106,73 @@ def get_predictor():
     if _predictor_instance is None:
         _predictor_instance = PhishGuardPredictor()
     return _predictor_instance
+
+
+# ── UCI-Trained Predictor (Phase 10) ─────────────────────────────────────────
+
+class UCIPredictor:
+    """
+    Inference engine for the UCI-dataset-trained Random Forest.
+    Uses 17 browser-extractable features encoded in {-1, 0, 1}.
+
+    Labels: probability output is P(phishing) in [0, 1].
+    The underlying model was trained with 0=legitimate, 1=phishing.
+    """
+
+    def __init__(self):
+        base_dir = os.path.dirname(__file__)
+        self.model_path = os.path.join(base_dir, 'models', 'phishguard_uci_model.joblib')
+        self.meta_path  = os.path.join(base_dir, 'models', 'uci_metadata.json')
+        self.model = None
+        self.metadata = {}
+        self._load()
+
+    def _load(self):
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(
+                f"UCI model not found at {self.model_path}. Run train_uci.py first."
+            )
+        self.model = joblib.load(self.model_path)
+        if os.path.exists(self.meta_path):
+            with open(self.meta_path) as f:
+                self.metadata = json.load(f)
+
+    def predict(self, url: str, dom_signals: dict = None) -> dict:
+        from uci_features import extract_uci_features, UCI_FEATURE_NAMES
+
+        feats = extract_uci_features(url, dom_signals)
+        row   = pd.DataFrame([feats])[UCI_FEATURE_NAMES]
+
+        # Model was trained with: 0=legitimate, 1=phishing
+        proba     = float(self.model.predict_proba(row)[0][1])
+        risk_score = round(proba * 100)
+
+        if risk_score > 60:
+            tier = 'HIGH RISK'; level_key = 'high-risk'
+        elif risk_score > 30:
+            tier = 'SUSPICIOUS'; level_key = 'suspicious'
+        else:
+            tier = 'SAFE'; level_key = 'safe'
+
+        confidence = round(abs(proba - 0.5) * 2.0, 3)
+
+        return {
+            'url':        url,
+            'isPhishing': proba > 0.5,
+            'probability': round(proba, 4),
+            'riskScore':  risk_score,
+            'riskLevel':  tier,
+            'levelKey':   level_key,
+            'confidence': confidence,
+            'model':      'RandomForestClassifier-UCI (v2.0.0)',
+            'features':   feats
+        }
+
+
+_uci_predictor_instance = None
+
+def get_uci_predictor():
+    global _uci_predictor_instance
+    if _uci_predictor_instance is None:
+        _uci_predictor_instance = UCIPredictor()
+    return _uci_predictor_instance

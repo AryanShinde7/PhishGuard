@@ -50,12 +50,12 @@ function scoreFlags(urlFlags = [], domFlags = []) {
 }
 
 // ── Helper: Query Python ML Microservice ─────────────────────────────────────
-async function queryMlService(url, domSignals) {
+async function queryMlService(url, domSignals, path = '/predict') {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1200); // 1.2s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout
 
-    const response = await fetch(`${ML_SERVICE_URL}/predict`, {
+    const response = await fetch(`${ML_SERVICE_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, domSignals }),
@@ -91,25 +91,46 @@ async function analyzeUrl(req, res) {
     }
 
     const domain = parsedUrl.hostname.toLowerCase();
-    
-    // 1. Calculate Rule-Based Heuristics
+
+    // 1. Rule-Based Heuristics (always runs, never blocked)
     const { score: ruleScore, level: ruleLevel, breakdown } = scoreFlags(urlFlags, domFlags);
 
-    // 2. Query ML Microservice (Phase 9)
-    const mlResult = await queryMlService(url, domSignals);
+    // 2. Query both ML endpoints in parallel (Phase 9 + Phase 10)
+    const [mlResult, uciResult] = await Promise.all([
+      queryMlService(url, domSignals),
+      queryMlService(url, domSignals, '/predict/uci')
+    ]);
 
-    // 3. Ensemble Hybrid Score (Weighted: 50% Rules + 50% ML Model if available)
+    // 3. Ensemble: 45% rule-based + 55% UCI ML (when UCI model is available)
+    //    Falls back to 50/50 with Phase-9 model, then pure rules.
     let finalScore = ruleScore;
     let finalLevel = ruleLevel;
+    let mlAnalysis = { status: 'offline', fallback: 'rule-based heuristics' };
 
-    if (mlResult) {
-      const mlScore = mlResult.riskScore;
-      // High-confidence ensemble blending
-      finalScore = Math.min(100, Math.max(0, Math.round(0.5 * ruleScore + 0.5 * mlScore)));
+    if (uciResult) {
+      finalScore = Math.min(100, Math.max(0, Math.round(0.45 * ruleScore + 0.55 * uciResult.riskScore)));
       finalLevel = finalScore > 60 ? 'HIGH RISK' : finalScore > 30 ? 'SUSPICIOUS' : 'SAFE';
+      mlAnalysis = {
+        model: uciResult.model,
+        probability: uciResult.probability,
+        isPhishing: uciResult.isPhishing,
+        confidence: uciResult.confidence,
+        uciFeatures: uciResult.features,
+        phase9: mlResult ? { probability: mlResult.probability } : null
+      };
+    } else if (mlResult) {
+      finalScore = Math.min(100, Math.max(0, Math.round(0.5 * ruleScore + 0.5 * mlResult.riskScore)));
+      finalLevel = finalScore > 60 ? 'HIGH RISK' : finalScore > 30 ? 'SUSPICIOUS' : 'SAFE';
+      mlAnalysis = {
+        model: mlResult.model,
+        probability: mlResult.probability,
+        isPhishing: mlResult.isPhishing,
+        confidence: mlResult.confidence,
+        phase9Only: true
+      };
     }
 
-    // 4. Persist to MongoDB (Phase 7)
+    // 4. Persist to MongoDB
     let saved = null;
     try {
       saved = await Detection.create({
@@ -122,8 +143,8 @@ async function analyzeUrl(req, res) {
         reasons,
         features: {
           ...(domSignals?.features || {}),
-          mlProbability: mlResult?.probability ?? null,
-          mlConfidence: mlResult?.confidence ?? null
+          uciProbability: uciResult?.probability ?? null,
+          mlProbability:  mlResult?.probability ?? null,
         },
         source: 'extension'
       });
@@ -141,13 +162,7 @@ async function analyzeUrl(req, res) {
       domFlags,
       reasons,
       breakdown,
-      mlAnalysis:  mlResult ? {
-        probability: mlResult.probability,
-        isPhishing: mlResult.isPhishing,
-        confidence: mlResult.confidence,
-        factors: mlResult.factors,
-        model: mlResult.model
-      } : { status: 'offline', fallback: 'rule-based heuristics' },
+      mlAnalysis,
       analyzedAt:  new Date().toISOString()
     };
 

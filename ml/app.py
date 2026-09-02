@@ -9,7 +9,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import json
-from predictor import get_predictor
+from predictor import get_predictor, get_uci_predictor
 
 app = Flask(__name__)
 CORS(app)
@@ -100,6 +100,33 @@ def predict_batch():
             'success': False,
             'error': f"Batch inference failed: {str(e)}"
         }), 500
+
+# ── UCI Prediction Endpoint (Phase 10) ──────────────────────────────────────
+
+@app.route('/predict/uci', methods=['POST'])
+def predict_uci():
+    """
+    POST /predict/uci
+    Body: { "url": "http://...", "domSignals": { ... } }
+    Uses the UCI-trained 17-feature Random Forest model.
+    Returns probability of phishing (0.0 = definitely legit, 1.0 = definitely phishing).
+    """
+    data = request.get_json(silent=True)
+    if not data or 'url' not in data:
+        return jsonify({'success': False, 'error': 'Missing required "url" field.'}), 400
+    url = data.get('url', '').strip()
+    if not url:
+        return jsonify({'success': False, 'error': 'Empty URL.'}), 400
+    dom_signals = data.get('domSignals', None)
+    try:
+        predictor = get_uci_predictor()
+        result = predictor.predict(url, dom_signals)
+        return jsonify({'success': True, 'prediction': result})
+    except FileNotFoundError as e:
+        return jsonify({'success': False, 'error': str(e), 'hint': 'Run train_uci.py first.'}), 503
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'UCI inference failed: {str(e)}'}), 500
+
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 

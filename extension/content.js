@@ -180,16 +180,86 @@
     }
 
     // 10. Missing favicon on a login page
-    const hasFavicon = Array.from(document.querySelectorAll('link[rel]'))
-      .some(l => l.getAttribute('rel').toLowerCase().includes('icon'));
+    const faviconLink = Array.from(document.querySelectorAll('link[rel]'))
+      .find(l => l.getAttribute('rel').toLowerCase().includes('icon'));
+    const hasFavicon = !!faviconLink;
     signals.features.hasFavicon = hasFavicon;
+
+    // UCI Feature 10: Favicon — is it loaded from an external domain?
+    const faviconHref = faviconLink ? (faviconLink.getAttribute('href') || '') : '';
+    const faviconHost = faviconHref.startsWith('http') ? safeHostname(faviconHref) : '';
+    const faviconExternal = faviconHost ? isExternal(faviconHost, pageHost) : false;
+    signals.features.faviconExternal = faviconExternal;
+
     if (!hasFavicon && hasPassword) {
       signals.flags.push('NO_FAVICON_WITH_LOGIN');
       signals.reasons.push('Login page is missing a favicon — common in phishing clones.');
     }
 
+    // ── UCI Phase 10 Feature Additions ────────────────────────────────────────
+
+    // UCI Feature 13: Request_URL — fraction of page resources from external domains
+    // Counts <img src>, <script src>, <link href>, <iframe src>
+    let extResources = 0, totalResources = 0;
+    document.querySelectorAll('img[src],script[src],link[href],iframe[src]').forEach(el => {
+      const src = el.getAttribute('src') || el.getAttribute('href') || '';
+      if (/^https?:\/\//.test(src)) {
+        totalResources++;
+        if (isExternal(safeHostname(src), pageHost)) extResources++;
+      }
+    });
+    signals.features.externalResourceRatio = totalResources > 0
+      ? parseFloat((extResources / totalResources).toFixed(2)) : 0;
+
+    // UCI Feature 15: Links_in_tags — fraction of <link>/<script>/<meta> tags linking externally
+    let extTags = 0, totalTags = 0;
+    document.querySelectorAll('link[href],script[src],meta[content]').forEach(el => {
+      const href = el.getAttribute('href') || el.getAttribute('src') || el.getAttribute('content') || '';
+      if (/^https?:\/\//.test(href)) {
+        totalTags++;
+        if (isExternal(safeHostname(href), pageHost)) extTags++;
+      }
+    });
+    signals.features.externalTagRatio = totalTags > 0
+      ? parseFloat((extTags / totalTags).toFixed(2)) : 0;
+
+    // UCI Feature 16: SFH — Server Form Handler classification
+    // 'blank' = about:blank or empty action (most suspicious), 'external' = cross-domain, 'same' = safe
+    let sfhStatus = 'same';
+    for (const form of forms) {
+      const action = (form.action || '').trim();
+      if (!action || /^about:/i.test(action)) {
+        sfhStatus = 'blank'; break;
+      }
+      const aHost = safeHostname(action);
+      if (aHost && isExternal(aHost, pageHost)) {
+        sfhStatus = 'external';
+      }
+    }
+    signals.features.sfhStatus = sfhStatus;
+
+    // UCI Feature 17: Submitting_to_email — any form uses mailto: action
+    const hasMailtoForm = forms.some(f => (f.action || '').toLowerCase().startsWith('mailto:'));
+    signals.features.hasMailtoForm = hasMailtoForm;
+    if (hasMailtoForm) {
+      signals.flags.push('MAILTO_FORM_ACTION');
+      signals.reasons.push('Form submits credentials via email (mailto: action) — phishing tactic.');
+    }
+
+    // UCI Feature 20: on_mouseover — does any element set window.status via onmouseover?
+    const onMouseoverStatus = Array.from(document.querySelectorAll('[onmouseover]'))
+      .some(el => (el.getAttribute('onmouseover') || '').toLowerCase().includes('window.status'));
+    signals.features.onMouseoverStatus = onMouseoverStatus;
+
+    // UCI Feature 21: RightClick — is contextmenu event blocked?
+    const pageSource = document.documentElement.outerHTML.slice(0, 8000).toLowerCase();
+    const rightClickDisabled = pageSource.includes('contextmenu') &&
+      (pageSource.includes('preventdefault') || pageSource.includes('return false'));
+    signals.features.rightClickDisabled = rightClickDisabled;
+
     return signals;
   }
+
 
   // ── Send signals to background ───────────────────────────────────────────────
   function notifyBackground() {
