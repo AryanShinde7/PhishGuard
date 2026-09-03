@@ -7,9 +7,15 @@
 
 // Known frequently abused / free / high-risk TLDs
 const SUSPICIOUS_TLDS = new Set([
-  'tk', 'ml', 'ga', 'cf', 'gq', 'top', 'xyz', 'work', 'buzz', 'fit',
-  'click', 'surf', 'rest', 'bar', 'icu', 'cam', 'sbs', 'monster',
-  'cyou', 'fun', 'quest', 'skin', 'beauty', 'hair', 'uno'
+  // Freenom / historically abused
+  'tk', 'ml', 'ga', 'cf', 'gq',
+  // Generic abuse-prone
+  'top', 'xyz', 'work', 'buzz', 'fit', 'click', 'surf', 'rest', 'bar',
+  'icu', 'cam', 'sbs', 'monster', 'cyou', 'fun', 'quest', 'skin', 'beauty',
+  'hair', 'uno', 'vip', 'bond', 'cfd', 'lat',
+  // Newly abused TLDs observed in PhishTank/APWG reports
+  'lol', 'online', 'site', 'store', 'pw', 'cc', 'biz', 'info',
+  'live', 'app', 'gdn', 'agency', 'digital'
 ]);
 
 // High-confidence phishing trigger keywords
@@ -25,11 +31,37 @@ const SUSPICIOUS_KEYWORDS = [
 
 // Target Brands frequently impersonated in phishing attacks
 const MONITORED_BRANDS = [
+  // Big Tech / Social
   'paypal', 'apple', 'google', 'microsoft', 'netflix', 'amazon',
-  'facebook', 'instagram', 'whatsapp', 'telegram', 'binance',
-  'coinbase', 'metamask', 'chase', 'wellsfargo', 'bankofamerica',
-  'adobe', 'dropbox', 'dhl', 'fedex', 'usps'
+  'facebook', 'instagram', 'whatsapp', 'telegram', 'linkedin',
+  'twitter', 'tiktok', 'youtube', 'discord', 'steam', 'roblox',
+  // Crypto
+  'binance', 'coinbase', 'metamask', 'kraken', 'blockchain',
+  // Banking & Finance
+  'chase', 'wellsfargo', 'bankofamerica', 'citibank', 'capitalone',
+  'usbank', 'barclays', 'hsbc', 'hdfc', 'sbi', 'icici', 'axis',
+  // Government / Tax
+  'irs', 'hmrc', 'medicare', 'socialsecurity', 'gov',
+  // Delivery & SaaS
+  'adobe', 'dropbox', 'dhl', 'fedex', 'usps', 'ups', 'allegro', 'ebay'
 ];
+
+// Free / anonymous hosting platforms frequently abused for phishing
+const FREE_HOSTING_PLATFORMS = new Set([
+  // Cloud / CDN
+  'netlify.app', 'netlify.com',
+  'github.io',
+  'pages.dev', 'workers.dev',  // Cloudflare
+  'web.core.windows.net', 'azurewebsites.net', 'azurestaticapps.net', // Azure
+  'z1.web.core.windows.net', 'z2.web.core.windows.net', 'z3.web.core.windows.net',
+  'z4.web.core.windows.net', 'z5.web.core.windows.net', 'z6.web.core.windows.net',
+  'z7.web.core.windows.net', 'z8.web.core.windows.net', 'z9.web.core.windows.net',
+  // Free site builders
+  'glitch.me', 'replit.com', 'repl.co',
+  'zohosites.com', 'sites.google.com', 'weebly.com', 'wix.com',
+  '000webhostapp.com', 'byethost.com', 'infinityfree.net',
+  'firebaseapp.com', 'web.app',  // Firebase
+]);
 
 // Popular legitimate search engines/domains to avoid false positives
 const KNOWN_SEARCH_DOMAINS = new Set([
@@ -190,16 +222,16 @@ export function analyzeUrl(rawUrl) {
     result.reasons.push(`Uses a high-risk / frequently abused top-level domain (.${tld}).`);
   }
 
-  // Feature 10: Abnormal Lengths
+  // Feature 10: Abnormal Lengths (lowered threshold: 75 chars for URL, 30 for hostname)
   const urlLength = rawUrl.length;
   const hostLength = hostname.length;
   result.features.urlLength = urlLength;
   result.features.hostLength = hostLength;
-  if (urlLength > 90) {
+  if (urlLength > 75) {
     result.flags.push('LONG_URL');
     result.reasons.push(`Abnormally long URL (${urlLength} characters), used to hide real destination parameters.`);
   }
-  if (hostLength > 35) {
+  if (hostLength > 30) {
     result.flags.push('LONG_HOSTNAME');
     result.reasons.push(`Abnormally long domain name (${hostLength} characters).`);
   }
@@ -211,10 +243,32 @@ export function analyzeUrl(rawUrl) {
     result.reasons.push('Suspicious open redirect structure ("//") detected in URL path.');
   }
 
+  // Feature 12: Free / anonymous hosting platform detection
+  // Checks the full host suffix — catches subdomains of abuse-prone platforms
+  const isFreePlatform = [...FREE_HOSTING_PLATFORMS].some(p =>
+    hostname === p || hostname.endsWith('.' + p)
+  );
+  result.features.isFreePlatform = isFreePlatform;
+  if (isFreePlatform) {
+    result.flags.push('FREE_HOSTING_PLATFORM');
+    result.reasons.push(`Hosted on a free/anonymous platform (${hostname}) commonly abused for phishing.`);
+  }
+
+  // Feature 13: Heavy numeric patterns in domain (e.g. oferta7329836, z44-abc-9912)
+  // Legitimate domains rarely embed 5+ digit sequences
+  const registeredDomain = domainParts.slice(-2).join('.');
+  const numericMatch = registeredDomain.match(/\d{5,}/) ||
+    domainParts.slice(0, -2).join('.').match(/\d{5,}/);
+  result.features.hasNumericPattern = !!numericMatch;
+  if (numericMatch) {
+    result.flags.push('NUMERIC_DOMAIN');
+    result.reasons.push(`Domain contains a suspicious numeric sequence (${numericMatch[0]}), common in auto-generated phishing domains.`);
+  }
+
   return result;
 }
 
 // Support CommonJS for Node test scripts
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { analyzeUrl, SUSPICIOUS_TLDS, SUSPICIOUS_KEYWORDS, MONITORED_BRANDS };
+  module.exports = { analyzeUrl, SUSPICIOUS_TLDS, SUSPICIOUS_KEYWORDS, MONITORED_BRANDS, FREE_HOSTING_PLATFORMS };
 }

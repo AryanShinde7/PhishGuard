@@ -21,19 +21,23 @@ const analyzeValidation = [
   body('domSignals').optional().isObject().withMessage('domSignals must be an object.')
 ];
 
-// ── Inline scoring weights (mirrors riskEngine.js) ────────────────────────────
+// ── Inline scoring weights — must mirror riskEngine.js exactly ────────────────
 const WEIGHTS = {
+  // URL flags
   BRAND_IMPERSONATION: 20, IP_HOST: 20, AT_SYMBOL: 20,
-  INSECURE_HTTP: 15, PUNYCODE_HOMOGRAPH: 15,
-  SUSPICIOUS_KEYWORDS: 10, SUSPICIOUS_TLD: 10,
-  EXCESSIVE_SUBDOMAINS: 10, EXCESSIVE_HYPHENS: 10,
+  INSECURE_HTTP: 20, PUNYCODE_HOMOGRAPH: 15,
+  FREE_HOSTING_PLATFORM: 15,
+  SUSPICIOUS_KEYWORDS: 10, KEYWORD_MULTIPLE_BONUS: 5,
+  SUSPICIOUS_TLD: 12,
+  EXCESSIVE_SUBDOMAINS: 10, EXCESSIVE_HYPHENS: 10, NUMERIC_DOMAIN: 10,
   REDIRECT_IN_PATH: 10, LONG_URL: 5, LONG_HOSTNAME: 5,
-  // DOM
+  // DOM flags
   CROSS_DOMAIN_FORM: 20, PASSWORD_ON_HTTP: 15, LOGIN_FORM_DETECTED: 10,
   HTTP_FORM_ACTION: 15, SUSPICIOUS_FORM_TLD: 10,
   TITLE_BRAND_IMPERSONATION: 15, URGENCY_LANGUAGE: 10,
   SUSPICIOUS_EXTERNAL_SCRIPT: 10, EXTERNAL_IFRAME: 10,
-  EXCESSIVE_HIDDEN_INPUTS: 5, HIGH_EXTERNAL_LINK_RATIO: 5, NO_FAVICON_WITH_LOGIN: 5
+  EXCESSIVE_HIDDEN_INPUTS: 5, HIGH_EXTERNAL_LINK_RATIO: 5,
+  NO_FAVICON_WITH_LOGIN: 5, MAILTO_FORM_ACTION: 10
 };
 
 function scoreFlags(urlFlags = [], domFlags = []) {
@@ -45,17 +49,19 @@ function scoreFlags(urlFlags = [], domFlags = []) {
     breakdown.push({ flag: f, points: pts, source: src });
   });
   score = Math.min(100, Math.max(0, score));
-  const level = score > 60 ? 'HIGH RISK' : score > 30 ? 'SUSPICIOUS' : 'SAFE';
+  // Threshold must match riskEngine.js: SAFE ≤ 20
+  const level = score > 60 ? 'HIGH RISK' : score > 20 ? 'SUSPICIOUS' : 'SAFE';
   return { score, level, breakdown };
 }
 
+
 // ── Helper: Query Python ML Microservice ─────────────────────────────────────
-async function queryMlService(url, domSignals) {
+async function queryMlService(url, domSignals, path = '/predict') {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1200); // 1.2s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout
 
-    const response = await fetch(`${ML_SERVICE_URL}/predict`, {
+    const response = await fetch(`${ML_SERVICE_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, domSignals }),
@@ -91,25 +97,46 @@ async function analyzeUrl(req, res) {
     }
 
     const domain = parsedUrl.hostname.toLowerCase();
-    
-    // 1. Calculate Rule-Based Heuristics
+
+    // 1. Rule-Based Heuristics (always runs, never blocked)
     const { score: ruleScore, level: ruleLevel, breakdown } = scoreFlags(urlFlags, domFlags);
 
-    // 2. Query ML Microservice (Phase 9)
-    const mlResult = await queryMlService(url, domSignals);
+    // 2. Query both ML endpoints in parallel (Phase 9 + Phase 10)
+    const [mlResult, uciResult] = await Promise.all([
+      queryMlService(url, domSignals),
+      queryMlService(url, domSignals, '/predict/uci')
+    ]);
 
-    // 3. Ensemble Hybrid Score (Weighted: 50% Rules + 50% ML Model if available)
+    // 3. Ensemble: 45% rule-based + 55% UCI ML (when UCI model is available)
+    //    Falls back to 50/50 with Phase-9 model, then pure rules.
     let finalScore = ruleScore;
     let finalLevel = ruleLevel;
+    let mlAnalysis = { status: 'offline', fallback: 'rule-based heuristics' };
 
-    if (mlResult) {
-      const mlScore = mlResult.riskScore;
-      // High-confidence ensemble blending
-      finalScore = Math.min(100, Math.max(0, Math.round(0.5 * ruleScore + 0.5 * mlScore)));
+    if (uciResult) {
+      finalScore = Math.min(100, Math.max(0, Math.round(0.45 * ruleScore + 0.55 * uciResult.riskScore)));
       finalLevel = finalScore > 60 ? 'HIGH RISK' : finalScore > 30 ? 'SUSPICIOUS' : 'SAFE';
+      mlAnalysis = {
+        model: uciResult.model,
+        probability: uciResult.probability,
+        isPhishing: uciResult.isPhishing,
+        confidence: uciResult.confidence,
+        uciFeatures: uciResult.features,
+        phase9: mlResult ? { probability: mlResult.probability } : null
+      };
+    } else if (mlResult) {
+      finalScore = Math.min(100, Math.max(0, Math.round(0.5 * ruleScore + 0.5 * mlResult.riskScore)));
+      finalLevel = finalScore > 60 ? 'HIGH RISK' : finalScore > 30 ? 'SUSPICIOUS' : 'SAFE';
+      mlAnalysis = {
+        model: mlResult.model,
+        probability: mlResult.probability,
+        isPhishing: mlResult.isPhishing,
+        confidence: mlResult.confidence,
+        phase9Only: true
+      };
     }
 
-    // 4. Persist to MongoDB (Phase 7)
+    // 4. Persist to MongoDB
     let saved = null;
     try {
       saved = await Detection.create({
@@ -122,8 +149,8 @@ async function analyzeUrl(req, res) {
         reasons,
         features: {
           ...(domSignals?.features || {}),
-          mlProbability: mlResult?.probability ?? null,
-          mlConfidence: mlResult?.confidence ?? null
+          uciProbability: uciResult?.probability ?? null,
+          mlProbability:  mlResult?.probability ?? null,
         },
         source: 'extension'
       });
@@ -141,13 +168,7 @@ async function analyzeUrl(req, res) {
       domFlags,
       reasons,
       breakdown,
-      mlAnalysis:  mlResult ? {
-        probability: mlResult.probability,
-        isPhishing: mlResult.isPhishing,
-        confidence: mlResult.confidence,
-        factors: mlResult.factors,
-        model: mlResult.model
-      } : { status: 'offline', fallback: 'rule-based heuristics' },
+      mlAnalysis,
       analyzedAt:  new Date().toISOString()
     };
 

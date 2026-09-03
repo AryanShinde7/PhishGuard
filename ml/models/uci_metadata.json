@@ -1,0 +1,117 @@
+{
+  "model_type": "RandomForestClassifier",
+  "version": "2.0.0",
+  "dataset": "UCI Phishing Websites (Mohammad et al., 2013)",
+  "train_samples": 4679,
+  "test_samples": 1170,
+  "n_features": 17,
+  "feature_names": [
+    "having_IP_Address",
+    "URL_Length",
+    "Shortining_Service",
+    "having_At_Symbol",
+    "double_slash_redirecting",
+    "Prefix_Suffix",
+    "having_Sub_Domain",
+    "HTTPS_token",
+    "Favicon",
+    "port",
+    "Request_URL",
+    "URL_of_Anchor",
+    "Links_in_tags",
+    "SFH",
+    "Submitting_to_email",
+    "on_mouseover",
+    "RightClick"
+  ],
+  "label_convention": {
+    "training_binary": "0=legitimate, 1=phishing",
+    "uci_original": "-1=phishing, 1=legitimate",
+    "prediction_output": "probability of phishing (0.0 to 1.0)"
+  },
+  "metrics": {
+    "accuracy": 0.8915,
+    "precision": 0.9313,
+    "recall": 0.8526,
+    "f1_score": 0.8902,
+    "roc_auc": 0.9715,
+    "cv_f1_mean": 0.8964,
+    "cv_f1_std": 0.0092
+  },
+  "confusion_matrix": {
+    "TN": 528,
+    "FP": 38,
+    "FN": 89,
+    "TP": 515
+  },
+  "feature_importances": [
+    {
+      "feature": "URL_of_Anchor",
+      "importance": 0.5086
+    },
+    {
+      "feature": "Prefix_Suffix",
+      "importance": 0.1042
+    },
+    {
+      "feature": "having_Sub_Domain",
+      "importance": 0.0954
+    },
+    {
+      "feature": "Links_in_tags",
+      "importance": 0.0767
+    },
+    {
+      "feature": "SFH",
+      "importance": 0.061
+    },
+    {
+      "feature": "Request_URL",
+      "importance": 0.0301
+    },
+    {
+      "feature": "having_IP_Address",
+      "importance": 0.0171
+    },
+    {
+      "feature": "Shortining_Service",
+      "importance": 0.0164
+    },
+    {
+      "feature": "URL_Length",
+      "importance": 0.0159
+    },
+    {
+      "feature": "Favicon",
+      "importance": 0.0156
+    },
+    {
+      "feature": "on_mouseover",
+      "importance": 0.0111
+    },
+    {
+      "feature": "having_At_Symbol",
+      "importance": 0.0101
+    },
+    {
+      "feature": "HTTPS_token",
+      "importance": 0.0099
+    },
+    {
+      "feature": "double_slash_redirecting",
+      "importance": 0.0098
+    },
+    {
+      "feature": "Submitting_to_email",
+      "importance": 0.0091
+    },
+    {
+      "feature": "port",
+      "importance": 0.0058
+    },
+    {
+      "feature": "RightClick",
+      "importance": 0.0033
+    }
+  ]
+}
