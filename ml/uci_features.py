@@ -82,17 +82,23 @@ def f_prefix_suffix(hostname: str) -> int:
 
 def f_having_sub_domain(hostname: str) -> int:
     """Feature 7: Subdomain depth tier.
-    1 = one subdomain level (typical legit), 0 = two levels, -1 = three+ (phishing)
+    UCI encoding (Mohammad et al.):
+      1 = no subdomain or single 'www' (legit)
+      0 = one meaningful subdomain level (suspicious)
+     -1 = two or more subdomain levels (phishing)
     """
     parts = [p for p in hostname.split('.') if p]
-    # parts[-2:] = registered domain; everything before = subdomains
+    # parts[-2:] = registered domain (e.g. ['google', 'com'])
+    # everything before = subdomains
     sub_parts = parts[:-2]
-    depth = len(sub_parts)
-    if depth <= 0:
-        return 1
+    # Treat bare 'www' as effectively no subdomain
+    meaningful = [p for p in sub_parts if p.lower() != 'www']
+    depth = len(meaningful)
+    if depth == 0:
+        return 1   # no real subdomain — legit
     elif depth == 1:
-        return 0
-    return -1
+        return 0   # one level — suspicious
+    return -1      # two+ levels — phishing signal
 
 
 def f_https_token(hostname: str) -> int:

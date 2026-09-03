@@ -21,19 +21,23 @@ const analyzeValidation = [
   body('domSignals').optional().isObject().withMessage('domSignals must be an object.')
 ];
 
-// ── Inline scoring weights (mirrors riskEngine.js) ────────────────────────────
+// ── Inline scoring weights — must mirror riskEngine.js exactly ────────────────
 const WEIGHTS = {
+  // URL flags
   BRAND_IMPERSONATION: 20, IP_HOST: 20, AT_SYMBOL: 20,
-  INSECURE_HTTP: 15, PUNYCODE_HOMOGRAPH: 15,
-  SUSPICIOUS_KEYWORDS: 10, SUSPICIOUS_TLD: 10,
-  EXCESSIVE_SUBDOMAINS: 10, EXCESSIVE_HYPHENS: 10,
+  INSECURE_HTTP: 20, PUNYCODE_HOMOGRAPH: 15,
+  FREE_HOSTING_PLATFORM: 15,
+  SUSPICIOUS_KEYWORDS: 10, KEYWORD_MULTIPLE_BONUS: 5,
+  SUSPICIOUS_TLD: 12,
+  EXCESSIVE_SUBDOMAINS: 10, EXCESSIVE_HYPHENS: 10, NUMERIC_DOMAIN: 10,
   REDIRECT_IN_PATH: 10, LONG_URL: 5, LONG_HOSTNAME: 5,
-  // DOM
+  // DOM flags
   CROSS_DOMAIN_FORM: 20, PASSWORD_ON_HTTP: 15, LOGIN_FORM_DETECTED: 10,
   HTTP_FORM_ACTION: 15, SUSPICIOUS_FORM_TLD: 10,
   TITLE_BRAND_IMPERSONATION: 15, URGENCY_LANGUAGE: 10,
   SUSPICIOUS_EXTERNAL_SCRIPT: 10, EXTERNAL_IFRAME: 10,
-  EXCESSIVE_HIDDEN_INPUTS: 5, HIGH_EXTERNAL_LINK_RATIO: 5, NO_FAVICON_WITH_LOGIN: 5
+  EXCESSIVE_HIDDEN_INPUTS: 5, HIGH_EXTERNAL_LINK_RATIO: 5,
+  NO_FAVICON_WITH_LOGIN: 5, MAILTO_FORM_ACTION: 10
 };
 
 function scoreFlags(urlFlags = [], domFlags = []) {
@@ -45,9 +49,11 @@ function scoreFlags(urlFlags = [], domFlags = []) {
     breakdown.push({ flag: f, points: pts, source: src });
   });
   score = Math.min(100, Math.max(0, score));
-  const level = score > 60 ? 'HIGH RISK' : score > 30 ? 'SUSPICIOUS' : 'SAFE';
+  // Threshold must match riskEngine.js: SAFE ≤ 20
+  const level = score > 60 ? 'HIGH RISK' : score > 20 ? 'SUSPICIOUS' : 'SAFE';
   return { score, level, breakdown };
 }
+
 
 // ── Helper: Query Python ML Microservice ─────────────────────────────────────
 async function queryMlService(url, domSignals, path = '/predict') {

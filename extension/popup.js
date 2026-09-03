@@ -31,6 +31,9 @@ const btnToggleDiagnostics  = document.getElementById('btnToggleDiagnostics');
 const diagnosticTitle       = document.getElementById('diagnosticTitle');
 const diagnosticCollapse    = document.getElementById('diagnosticCollapse');
 const reasonsList           = document.getElementById('reasonsList');
+const mlStatusBox           = document.getElementById('mlStatusBox');
+const mlModelName           = document.getElementById('mlModelName');
+const mlProbability         = document.getElementById('mlProbability');
 const btnReport             = document.getElementById('btnReport');
 const btnSafe               = document.getElementById('btnSafe');
 
@@ -228,16 +231,56 @@ async function init() {
   // 7. Render Breakdown List
   renderBreakdown(risk);
 
-  // 8. Sync state with background worker
+  // 8. Sync state with background worker and fetch ML results
   try {
     chrome.runtime.sendMessage({
       type: 'ANALYZE_URL',
       url: url,
       tabId: tab.id
+    }, (response) => {
+      if (response && response.status === 'ok' && response.evaluation) {
+        const ev = response.evaluation;
+        // If background worker has a server result with ML data, update the UI
+        if (ev.risk && ev.risk.mlAnalysis) {
+          const ml = ev.risk.mlAnalysis;
+          const mlBox = document.getElementById('mlStatusBox');
+          if (mlBox && ml.probability !== undefined) {
+            mlBox.style.display = 'block';
+            document.getElementById('mlModelName').textContent = ml.model || 'RandomForestClassifier-UCI';
+            document.getElementById('mlProbability').textContent = (ml.probability * 100).toFixed(2) + '%';
+            
+            // Update score if the server returned a blended ensemble score
+            if (ev.risk.score !== risk.score) {
+              animateScore(ev.risk.score);
+              scoreBarFill.style.width = `${Math.max(4, ev.risk.score)}%`;
+              riskBadge.className = `risk-badge ${ev.risk.levelKey}`;
+              riskLabel.textContent = `${ev.risk.level === 'SAFE' ? '✓' : ev.risk.level === 'SUSPICIOUS' ? '⚠' : '✕'}  ${ev.risk.level}`;
+            }
+          }
+        }
+      }
     });
   } catch (e) {
     // Worker silent catch
   }
+
+  // Listen for live updates from background worker (if ML responds while popup is open)
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === 'BACKEND_SCORE_UPDATE' && msg.tabId === activeTabId) {
+      const br = msg.data;
+      if (br.mlAnalysis && br.mlAnalysis.probability !== undefined) {
+        document.getElementById('mlStatusBox').style.display = 'block';
+        document.getElementById('mlModelName').textContent = br.mlAnalysis.model || 'RandomForestClassifier-UCI';
+        document.getElementById('mlProbability').textContent = (br.mlAnalysis.probability * 100).toFixed(2) + '%';
+        
+        animateScore(br.riskScore);
+        scoreBarFill.style.width = `${Math.max(4, br.riskScore)}%`;
+        const levelKey = br.riskLevel === 'HIGH RISK' ? 'high-risk' : br.riskLevel === 'SUSPICIOUS' ? 'suspicious' : 'safe';
+        riskBadge.className = `risk-badge ${levelKey}`;
+        riskLabel.textContent = `${br.riskLevel === 'SAFE' ? '✓' : br.riskLevel === 'SUSPICIOUS' ? '⚠' : '✕'}  ${br.riskLevel}`;
+      }
+    }
+  });
 
   // ── Action Handlers ──────────────────────────────────────────────────────────
 
