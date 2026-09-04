@@ -1,37 +1,38 @@
 // src/components/Sidebar.jsx
-
-import { useState } from 'react';
+import { LayoutDashboard, ShieldAlert, MessageSquare, Globe, Shield } from 'lucide-react';
 
 const NAV = [
-  { id: 'overview',   label: 'Overview',    icon: '📊' },
-  { id: 'detections', label: 'Detections',  icon: '🔍' },
-  { id: 'feedback',   label: 'Feedback',    icon: '💬' },
-  { id: 'lookup',     label: 'Domain Lookup', icon: '🌐' },
+  { id: 'overview',   label: 'Overview',      Icon: LayoutDashboard },
+  { id: 'detections', label: 'Detections',    Icon: ShieldAlert },
+  { id: 'feedback',   label: 'Feedback',      Icon: MessageSquare },
+  { id: 'lookup',     label: 'Domain Lookup', Icon: Globe },
 ];
 
 export default function Sidebar({ active, onNav }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="logo-icon">🛡️</div>
+        <div className="logo-icon">
+          <Shield size={18} strokeWidth={2} />
+        </div>
         <span className="logo-text">PhishGuard</span>
       </div>
 
       <nav className="sidebar-nav">
-        {NAV.map(item => (
+        {NAV.map(({ id, label, Icon }) => (
           <button
-            key={item.id}
-            className={`nav-item ${active === item.id ? 'active' : ''}`}
-            onClick={() => onNav(item.id)}
+            key={id}
+            className={`nav-item ${active === id ? 'active' : ''}`}
+            onClick={() => onNav(id)}
           >
-            <span className="nav-icon">{item.icon}</span>
-            {item.label}
+            <Icon size={18} strokeWidth={1.75} className="nav-icon" />
+            {label}
           </button>
         ))}
       </nav>
 
       <div className="sidebar-footer">
-        SIH 2026 · CYB02<br />PhishGuard v0.1.0
+        CYB02 · SIH 2026<br />PhishGuard v0.1.0
       </div>
     </aside>
   );

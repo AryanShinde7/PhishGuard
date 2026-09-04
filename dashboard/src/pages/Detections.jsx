@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useDetections } from '../hooks/useDetections';
 import RiskBadge from '../components/RiskBadge';
 import ScoreBar from '../components/ScoreBar';
+import { Search, RefreshCw, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 const LEVELS = ['All', 'HIGH RISK', 'SUSPICIOUS', 'SAFE'];
 
@@ -18,7 +19,7 @@ function timeAgo(iso) {
 }
 
 export default function Detections() {
-  const [page, setPage]    = useState(1);
+  const [page, setPage]      = useState(1);
   const [levelFilter, setLF] = useState(null);
   const [search, setSearch]  = useState('');
 
@@ -37,12 +38,15 @@ export default function Detections() {
           <div className="section-title">Detection History</div>
           <div className="section-subtitle">{pagination.total} total records</div>
         </div>
-        <button className="btn-refresh" onClick={refetch}>↻ Refresh</button>
+        <button className="btn-refresh" onClick={refetch}>
+          <RefreshCw size={14} strokeWidth={2} />
+          Refresh
+        </button>
       </div>
 
       {/* Search */}
       <div className="search-bar">
-        <span className="search-icon">🔍</span>
+        <Search size={15} strokeWidth={1.75} className="search-icon" />
         <input
           placeholder="Search by URL or domain…"
           value={search}
@@ -69,13 +73,13 @@ export default function Detections() {
           <div className="spinner-wrap"><div className="spinner" /></div>
         ) : error ? (
           <div className="empty-state">
-            <div className="empty-icon">⚠️</div>
+            <AlertTriangle size={38} strokeWidth={1.5} className="empty-icon-svg" />
             <div className="empty-title">Could not load detections</div>
             <div className="empty-sub">{error}</div>
           </div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">🛡️</div>
+            <ShieldCheck size={38} strokeWidth={1.5} className="empty-icon-svg" />
             <div className="empty-title">No detections found</div>
             <div className="empty-sub">
               {search ? 'Try a different search term.' : 'Start browsing with the extension to populate detections.'}
