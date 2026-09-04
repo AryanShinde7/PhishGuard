@@ -51,35 +51,26 @@ async function isBypassed(url) {
   return false;
 }
 
-// Tabs where the popup has already automatically opened for this navigation
-const autoPoppedTabs = new Set();
+// Tracks tabs where we have already set the suspicious badge for this navigation
+const badgedTabs = new Set();
 
 /**
- * Automatically opens the extension popup when a site is classified as SUSPICIOUS
+ * Sets the extension icon badge to '!' (amber) when a site is SUSPICIOUS.
+ * We deliberately do NOT call chrome.action.openPopup() here — that API is
+ * highly restricted in MV3 service workers and causes erratic behaviour.
+ * The badge is enough: the user will notice the amber '!' on the toolbar icon
+ * and can click it to open the popup themselves.
  */
-function triggerSuspiciousPopup(tabId) {
-  if (!tabId || autoPoppedTabs.has(tabId)) return;
-  autoPoppedTabs.add(tabId);
+function markTabSuspicious(tabId) {
+  if (!tabId || badgedTabs.has(tabId)) return;
+  badgedTabs.add(tabId);
 
-  // Set action badge to caution symbol
   if (chrome.action && chrome.action.setBadgeText) {
     chrome.action.setBadgeText({ text: '!', tabId }).catch(() => {});
     chrome.action.setBadgeBackgroundColor({ color: '#f59e0b', tabId }).catch(() => {});
   }
 
-  // Attempt to open the extension popup automatically
-  if (chrome.action && typeof chrome.action.openPopup === 'function') {
-    chrome.tabs.get(tabId).then(tab => {
-      if (tab && tab.active) {
-        chrome.action.openPopup({ windowId: tab.windowId }).catch(() => {
-          chrome.action.openPopup().catch(() => {});
-        });
-        console.log(`[PhishGuard] ⚠️ Automatically opened extension popup for SUSPICIOUS site on tab #${tabId}`);
-      }
-    }).catch(() => {
-      chrome.action.openPopup().catch(() => {});
-    });
-  }
+  console.log(`[PhishGuard] ⚠️ Badge set for SUSPICIOUS site on tab #${tabId}`);
 }
 
 /**
@@ -126,14 +117,14 @@ function evaluateTabUrl(url, domSignals = null) {
   };
 }
 
-// ── Tab navigated: run URL-only analysis locally, intercept if HIGH RISK or popup if SUSPICIOUS ───────
+// ── Tab navigated: run URL-only analysis locally ────────────────────────────────────────────────────
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const currentUrl = changeInfo.url || tab.url;
   if (!currentUrl) return;
 
-  // Reset auto-pop flag on new navigation
+  // Clear badge on new navigation
   if (changeInfo.url) {
-    autoPoppedTabs.delete(tabId);
+    badgedTabs.delete(tabId);
     if (chrome.action && chrome.action.setBadgeText) {
       chrome.action.setBadgeText({ text: '', tabId }).catch(() => {});
     }
@@ -150,14 +141,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const evaluation = evaluateTabUrl(currentUrl, null);
     tabDataCache.set(tabId, { ...evaluation, domSignals: null, backendResult: null });
 
-    console.log(`[PhishGuard] #${tabId} → ${evaluation.domain} | Local heuristic: ${evaluation.risk.score} (${evaluation.risk.level})`);
+    console.log(`[PhishGuard] #${tabId} → ${evaluation.domain} | Score: ${evaluation.risk.score} (${evaluation.risk.level})`);
 
-    // Automatic Interception: If classified as HIGH RISK, block immediately
     if (evaluation.risk.level === 'HIGH RISK') {
+      // Intercept: redirect to the block page
       redirectToWarningPage(tabId, currentUrl, evaluation);
     } else if (evaluation.risk.level === 'SUSPICIOUS' && changeInfo.status === 'complete') {
-      // Automatic Popup: If classified as SUSPICIOUS, pop up the extension automatically!
-      triggerSuspiciousPopup(tabId);
+      // Only set the badge — do NOT force-open the popup
+      markTabSuspicious(tabId);
     }
   }
 });
@@ -165,7 +156,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Tab closed — cleanup cache
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabDataCache.delete(tabId);
-  autoPoppedTabs.delete(tabId);
+  badgedTabs.delete(tabId);
 });
 
 // ── Central Message Hub ────────────────────────────────────────────────────────
@@ -265,8 +256,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
               });
             } else if (br.riskLevel === 'SUSPICIOUS' || merged.risk.level === 'SUSPICIOUS') {
-              // If classified as SUSPICIOUS, automatically pop up extension!
-              triggerSuspiciousPopup(tabId);
+              // Only set the badge — do NOT force-open the popup
+              markTabSuspicious(tabId);
             }
           }
         }).catch(() => {});
