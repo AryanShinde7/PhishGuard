@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>⚠️ High Risk Website Intercepted — PhishGuard</title>
+  <link rel="stylesheet" href="warning.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="background-glow"></div>
+  <div class="grid-overlay"></div>
+
+  <div class="app-frame">
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <span class="brand-title">PhishGuard</span>
+        <span class="brand-badge">INTERCEPTOR ACTIVE</span>
+      </div>
+      <div class="status-indicator">
+        <span class="status-dot"></span>
+        <span>Real-Time Phishing Defense</span>
+      </div>
+    </header>
+
+    <!-- Main Interstitial Card: Balanced 2-Column Layout (Zero Page Scroll) -->
+    <main class="main-card">
+      
+      <!-- Left Panel: Primary Alert & Go Back Action -->
+      <section class="alert-panel">
+        <div class="alert-header">
+          <div class="shield-badge-wrap">
+            <div class="shield-pulse"></div>
+            <div class="shield-icon">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+          </div>
+          <div class="alert-title-group">
+            <div class="threat-level-tag" id="riskBadge">HIGH RISK THREAT</div>
+            <h1 class="headline">Dangerous Website Blocked</h1>
+          </div>
+        </div>
+
+        <p class="description">
+          PhishGuard intercepted this site before it could open. Attackers commonly use deceptive domains like this to steal passwords, financial credentials, or install malware.
+        </p>
+
+        <!-- Blocked Target URL Box -->
+        <div class="target-url-card">
+          <div class="target-label">INTERCEPTED DESTINATION</div>
+          <div class="target-content">
+            <svg class="globe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="2" y1="12" x2="22" y2="12"/>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </svg>
+            <span class="url-string" id="targetUrlText">Loading destination...</span>
+            <!-- Copy button disabled for clean UX -->
+          </div>
+        </div>
+
+        <!-- Primary Action Callout -->
+        <div class="primary-action-wrap">
+          <button class="btn-safety" id="goBackBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            <span>Go Back to Safety</span>
+          </button>
+        </div>
+
+        <!-- Safe Bypass Controls -->
+        <div class="bypass-footer">
+          <button class="link-btn text-muted" id="proceedAnywayBtn">
+            Proceed to unsafe site (not recommended)
+          </button>
+          <span class="sep">•</span>
+          <button class="link-btn text-muted" id="reportFalsePositiveBtn">
+            Report false positive
+          </button>
+        </div>
+      </section>
+
+      <!-- Right Panel: Threat Breakdown & Details (Clean & Compact) -->
+      <section class="intel-panel">
+        <div class="intel-header">
+          <div class="intel-title-wrap">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <h2>Threat Analysis Details</h2>
+          </div>
+          <div class="intel-score-chip danger" id="scoreValueBadge">85 / 100</div>
+        </div>
+
+        <!-- Score & ML Summary Bar -->
+        <div class="metrics-row">
+          <!-- Heuristic Meter -->
+          <div class="mini-metric">
+            <div class="mini-label">Risk Severity</div>
+            <div class="bar-track">
+              <div class="bar-fill" id="scoreBarFill" style="width: 85%;"></div>
+            </div>
+          </div>
+          <!-- ML AI Engine Badge -->
+          <div class="mini-metric ml-box" id="mlCard">
+            <div class="mini-label">🤖 AI Model Verdict</div>
+            <div class="ml-inline-val">
+              <span class="ml-prob" id="mlProbBadge">AI Analyzing...</span>
+              <span class="ml-model-name" id="mlModelVal">RandomForest-UCI</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reasons List Container (Internal Scroll only if needed, keeps page fixed) -->
+        <div class="reasons-block">
+          <div class="reasons-heading">Identified Threat Indicators:</div>
+          <div class="reasons-scroll-list" id="reasonsContainer">
+            <!-- Dynamic threat cards injected by warning.js -->
+          </div>
+        </div>
+
+        <!-- Safety Explanation Tip -->
+        <div class="safety-tip">
+          <svg class="tip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          <p>
+            PhishGuard combines <strong>17 DOM &amp; URL structural heuristics</strong> with a <strong>machine learning classifier</strong> trained on real phishing datasets to detect threats in real-time.
+          </p>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Footer -->
+    <footer class="bottom-bar">
+      <span>PhishGuard Security Assistant • Smart India Hackathon 2026</span>
+    </footer>
+  </div>
+
+  <script src="warning.js" type="module"></script>
+</body>
+</html>
