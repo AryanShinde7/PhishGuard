@@ -16,8 +16,40 @@ import { syncAnalysisToBackend } from './apiClient.js';
 // In-memory cache for tab evaluations
 const tabDataCache = new Map();
 
-// URLs that the user has explicitly chosen to bypass/proceed to
+// URLs that the user has explicitly chosen to bypass/proceed to.
+// Also persisted in chrome.storage.session so it survives service worker restarts.
 const bypassedUrls = new Set();
+
+// Load any previously stored bypasses from session storage on startup
+chrome.storage.session.get(['pg_bypassed_urls'], (res) => {
+  const stored = res.pg_bypassed_urls || [];
+  stored.forEach(u => bypassedUrls.add(u));
+});
+
+/** Persist the current bypassedUrls Set to session storage */
+function persistBypasses() {
+  chrome.storage.session.set({ pg_bypassed_urls: [...bypassedUrls] }).catch(() => {});
+}
+
+/** Add a URL to the bypass list (memory + session storage) */
+function addBypass(url) {
+  bypassedUrls.add(url);
+  persistBypasses();
+}
+
+/** Check if a URL is bypassed — checks both memory and session storage */
+async function isBypassed(url) {
+  if (bypassedUrls.has(url)) return true;
+  try {
+    const res = await chrome.storage.session.get(['pg_bypassed_urls']);
+    const stored = res.pg_bypassed_urls || [];
+    if (stored.includes(url)) {
+      bypassedUrls.add(url); // Re-populate in-memory cache
+      return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
 
 // Tabs where the popup has already automatically opened for this navigation
 const autoPoppedTabs = new Set();
@@ -95,7 +127,7 @@ function evaluateTabUrl(url, domSignals = null) {
 }
 
 // ── Tab navigated: run URL-only analysis locally, intercept if HIGH RISK or popup if SUSPICIOUS ───────
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const currentUrl = changeInfo.url || tab.url;
   if (!currentUrl) return;
 
@@ -110,8 +142,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // Only check standard HTTP/HTTPS navigations
   if (!currentUrl.startsWith('http://') && !currentUrl.startsWith('https://')) return;
 
-  // Ignore if user explicitly bypassed this destination
-  if (bypassedUrls.has(currentUrl)) return;
+  // Ignore if user explicitly bypassed this destination (check storage too)
+  if (await isBypassed(currentUrl)) return;
 
   // Evaluate URL heuristic flags as early as possible
   if (changeInfo.status === 'loading' || changeInfo.status === 'complete') {
@@ -143,7 +175,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'BYPASS_WARNING') {
     const { url } = message;
     if (url) {
-      bypassedUrls.add(url);
+      addBypass(url);  // Persist to session storage so bypass survives SW restart
       console.log(`[PhishGuard] User bypassed warning for: ${url}`);
     }
     sendResponse({ status: 'ok', bypassed: true });
@@ -209,7 +241,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log(`[PhishGuard] DOM ready for #${tabId}. Local score: ${merged.risk.score} → calling backend+ML...`);
 
         // Backend + ML call with full features (DOM signals present)
-        syncAnalysisToBackend(merged).then(backendResult => {
+        syncAnalysisToBackend(merged).then(async backendResult => {
           if (backendResult?.data) {
             const br = backendResult.data;
             const mlProb = br.mlAnalysis?.probability;
@@ -221,7 +253,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             chrome.runtime.sendMessage({ type: 'BACKEND_SCORE_UPDATE', tabId, data: br }).catch(() => {});
 
             // If backend ML + DOM analysis elevated this site to HIGH RISK, intercept tab now
-            if (br.riskLevel === 'HIGH RISK' && !bypassedUrls.has(existing.url)) {
+            // Only intercept if the user hasn't already bypassed this URL
+            if (br.riskLevel === 'HIGH RISK' && !(await isBypassed(existing.url))) {
               redirectToWarningPage(tabId, existing.url, {
                 ...merged,
                 risk: {
