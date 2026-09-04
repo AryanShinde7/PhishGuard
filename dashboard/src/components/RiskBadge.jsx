@@ -1,15 +1,18 @@
 // src/components/RiskBadge.jsx
+import { ShieldX, TriangleAlert, ShieldCheck } from 'lucide-react';
+
+const BADGE_MAP = {
+  'HIGH RISK':  { cls: 'high', Icon: ShieldX,       label: 'High Risk' },
+  'SUSPICIOUS': { cls: 'susp', Icon: TriangleAlert,  label: 'Suspicious' },
+  'SAFE':       { cls: 'safe', Icon: ShieldCheck,    label: 'Safe' },
+};
 
 export default function RiskBadge({ level }) {
-  const map = {
-    'HIGH RISK':  { cls: 'high', icon: '⛔', label: 'High Risk' },
-    'SUSPICIOUS': { cls: 'susp', icon: '⚠️', label: 'Suspicious' },
-    'SAFE':       { cls: 'safe', icon: '✓',  label: 'Safe' },
-  };
-  const { cls, icon, label } = map[level] || map['SAFE'];
+  const { cls, Icon, label } = BADGE_MAP[level] || BADGE_MAP['SAFE'];
   return (
     <span className={`risk-badge ${cls}`}>
-      {icon} {label}
+      <Icon size={11} strokeWidth={2.5} />
+      {label}
     </span>
   );
 }

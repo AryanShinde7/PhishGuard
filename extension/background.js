@@ -16,38 +16,61 @@ import { syncAnalysisToBackend } from './apiClient.js';
 // In-memory cache for tab evaluations
 const tabDataCache = new Map();
 
-// URLs that the user has explicitly chosen to bypass/proceed to
+// URLs that the user has explicitly chosen to bypass/proceed to.
+// Also persisted in chrome.storage.session so it survives service worker restarts.
 const bypassedUrls = new Set();
 
-// Tabs where the popup has already automatically opened for this navigation
-const autoPoppedTabs = new Set();
+// Load any previously stored bypasses from session storage on startup
+chrome.storage.session.get(['pg_bypassed_urls'], (res) => {
+  const stored = res.pg_bypassed_urls || [];
+  stored.forEach(u => bypassedUrls.add(u));
+});
+
+/** Persist the current bypassedUrls Set to session storage */
+function persistBypasses() {
+  chrome.storage.session.set({ pg_bypassed_urls: [...bypassedUrls] }).catch(() => {});
+}
+
+/** Add a URL to the bypass list (memory + session storage) */
+function addBypass(url) {
+  bypassedUrls.add(url);
+  persistBypasses();
+}
+
+/** Check if a URL is bypassed — checks both memory and session storage */
+async function isBypassed(url) {
+  if (bypassedUrls.has(url)) return true;
+  try {
+    const res = await chrome.storage.session.get(['pg_bypassed_urls']);
+    const stored = res.pg_bypassed_urls || [];
+    if (stored.includes(url)) {
+      bypassedUrls.add(url); // Re-populate in-memory cache
+      return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+// Tracks tabs where we have already set the suspicious badge for this navigation
+const badgedTabs = new Set();
 
 /**
- * Automatically opens the extension popup when a site is classified as SUSPICIOUS
+ * Sets the extension icon badge to '!' (amber) when a site is SUSPICIOUS.
+ * We deliberately do NOT call chrome.action.openPopup() here — that API is
+ * highly restricted in MV3 service workers and causes erratic behaviour.
+ * The badge is enough: the user will notice the amber '!' on the toolbar icon
+ * and can click it to open the popup themselves.
  */
-function triggerSuspiciousPopup(tabId) {
-  if (!tabId || autoPoppedTabs.has(tabId)) return;
-  autoPoppedTabs.add(tabId);
+function markTabSuspicious(tabId) {
+  if (!tabId || badgedTabs.has(tabId)) return;
+  badgedTabs.add(tabId);
 
-  // Set action badge to caution symbol
   if (chrome.action && chrome.action.setBadgeText) {
     chrome.action.setBadgeText({ text: '!', tabId }).catch(() => {});
     chrome.action.setBadgeBackgroundColor({ color: '#f59e0b', tabId }).catch(() => {});
   }
 
-  // Attempt to open the extension popup automatically
-  if (chrome.action && typeof chrome.action.openPopup === 'function') {
-    chrome.tabs.get(tabId).then(tab => {
-      if (tab && tab.active) {
-        chrome.action.openPopup({ windowId: tab.windowId }).catch(() => {
-          chrome.action.openPopup().catch(() => {});
-        });
-        console.log(`[PhishGuard] ⚠️ Automatically opened extension popup for SUSPICIOUS site on tab #${tabId}`);
-      }
-    }).catch(() => {
-      chrome.action.openPopup().catch(() => {});
-    });
-  }
+  console.log(`[PhishGuard] ⚠️ Badge set for SUSPICIOUS site on tab #${tabId}`);
 }
 
 /**
@@ -94,14 +117,14 @@ function evaluateTabUrl(url, domSignals = null) {
   };
 }
 
-// ── Tab navigated: run URL-only analysis locally, intercept if HIGH RISK or popup if SUSPICIOUS ───────
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+// ── Tab navigated: run URL-only analysis locally ────────────────────────────────────────────────────
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   const currentUrl = changeInfo.url || tab.url;
   if (!currentUrl) return;
 
-  // Reset auto-pop flag on new navigation
+  // Clear badge on new navigation
   if (changeInfo.url) {
-    autoPoppedTabs.delete(tabId);
+    badgedTabs.delete(tabId);
     if (chrome.action && chrome.action.setBadgeText) {
       chrome.action.setBadgeText({ text: '', tabId }).catch(() => {});
     }
@@ -110,22 +133,22 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // Only check standard HTTP/HTTPS navigations
   if (!currentUrl.startsWith('http://') && !currentUrl.startsWith('https://')) return;
 
-  // Ignore if user explicitly bypassed this destination
-  if (bypassedUrls.has(currentUrl)) return;
+  // Ignore if user explicitly bypassed this destination (check storage too)
+  if (await isBypassed(currentUrl)) return;
 
   // Evaluate URL heuristic flags as early as possible
   if (changeInfo.status === 'loading' || changeInfo.status === 'complete') {
     const evaluation = evaluateTabUrl(currentUrl, null);
     tabDataCache.set(tabId, { ...evaluation, domSignals: null, backendResult: null });
 
-    console.log(`[PhishGuard] #${tabId} → ${evaluation.domain} | Local heuristic: ${evaluation.risk.score} (${evaluation.risk.level})`);
+    console.log(`[PhishGuard] #${tabId} → ${evaluation.domain} | Score: ${evaluation.risk.score} (${evaluation.risk.level})`);
 
-    // Automatic Interception: If classified as HIGH RISK, block immediately
     if (evaluation.risk.level === 'HIGH RISK') {
+      // Intercept: redirect to the block page
       redirectToWarningPage(tabId, currentUrl, evaluation);
     } else if (evaluation.risk.level === 'SUSPICIOUS' && changeInfo.status === 'complete') {
-      // Automatic Popup: If classified as SUSPICIOUS, pop up the extension automatically!
-      triggerSuspiciousPopup(tabId);
+      // Only set the badge — do NOT force-open the popup
+      markTabSuspicious(tabId);
     }
   }
 });
@@ -133,7 +156,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Tab closed — cleanup cache
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabDataCache.delete(tabId);
-  autoPoppedTabs.delete(tabId);
+  badgedTabs.delete(tabId);
 });
 
 // ── Central Message Hub ────────────────────────────────────────────────────────
@@ -143,7 +166,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'BYPASS_WARNING') {
     const { url } = message;
     if (url) {
-      bypassedUrls.add(url);
+      addBypass(url);  // Persist to session storage so bypass survives SW restart
       console.log(`[PhishGuard] User bypassed warning for: ${url}`);
     }
     sendResponse({ status: 'ok', bypassed: true });
@@ -209,7 +232,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log(`[PhishGuard] DOM ready for #${tabId}. Local score: ${merged.risk.score} → calling backend+ML...`);
 
         // Backend + ML call with full features (DOM signals present)
-        syncAnalysisToBackend(merged).then(backendResult => {
+        syncAnalysisToBackend(merged).then(async backendResult => {
           if (backendResult?.data) {
             const br = backendResult.data;
             const mlProb = br.mlAnalysis?.probability;
@@ -221,7 +244,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             chrome.runtime.sendMessage({ type: 'BACKEND_SCORE_UPDATE', tabId, data: br }).catch(() => {});
 
             // If backend ML + DOM analysis elevated this site to HIGH RISK, intercept tab now
-            if (br.riskLevel === 'HIGH RISK' && !bypassedUrls.has(existing.url)) {
+            // Only intercept if the user hasn't already bypassed this URL
+            if (br.riskLevel === 'HIGH RISK' && !(await isBypassed(existing.url))) {
               redirectToWarningPage(tabId, existing.url, {
                 ...merged,
                 risk: {
@@ -232,8 +256,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
               });
             } else if (br.riskLevel === 'SUSPICIOUS' || merged.risk.level === 'SUSPICIOUS') {
-              // If classified as SUSPICIOUS, automatically pop up extension!
-              triggerSuspiciousPopup(tabId);
+              // Only set the badge — do NOT force-open the popup
+              markTabSuspicious(tabId);
             }
           }
         }).catch(() => {});

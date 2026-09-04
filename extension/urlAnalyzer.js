@@ -153,11 +153,20 @@ export function analyzeUrl(rawUrl) {
   }
 
   // Feature 3: Embedded '@' Symbol (Authority Trickery)
-  const hasAtSymbol = rawUrl.includes('@');
+  // Only flag if '@' appears in the authority section (before the first path '/'),
+  // NOT in query parameters or path segments where it is common and legitimate.
+  const authoritySection = (() => {
+    const schemeSep = rawUrl.indexOf('//') + 2;
+    if (schemeSep < 2) return '';
+    const afterScheme = rawUrl.slice(schemeSep);
+    const firstSlash = afterScheme.indexOf('/');
+    return firstSlash === -1 ? afterScheme : afterScheme.slice(0, firstSlash);
+  })();
+  const hasAtSymbol = authoritySection.includes('@');
   result.features.hasAtSymbol = hasAtSymbol;
   if (hasAtSymbol) {
     result.flags.push('AT_SYMBOL');
-    result.reasons.push("Contains '@' symbol in URL, often used to disguise malicious target hosts.");
+    result.reasons.push("Contains '@' symbol in URL authority section, a known tactic to disguise the real destination host.");
   }
 
   // Feature 4: Subdomain Depth
@@ -222,12 +231,15 @@ export function analyzeUrl(rawUrl) {
     result.reasons.push(`Uses a high-risk / frequently abused top-level domain (.${tld}).`);
   }
 
-  // Feature 10: Abnormal Lengths (lowered threshold: 75 chars for URL, 30 for hostname)
+  // Feature 10: Abnormal Lengths
+  // URL threshold raised to 200 chars — modern legitimate URLs (SaaS dashboards, social
+  // profiles, OAuth flows) are routinely long. Only flag egregiously long ones.
+  // Hostname threshold kept at 30 chars (still a strong phishing signal).
   const urlLength = rawUrl.length;
   const hostLength = hostname.length;
   result.features.urlLength = urlLength;
   result.features.hostLength = hostLength;
-  if (urlLength > 75) {
+  if (urlLength > 200) {
     result.flags.push('LONG_URL');
     result.reasons.push(`Abnormally long URL (${urlLength} characters), used to hide real destination parameters.`);
   }
