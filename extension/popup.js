@@ -36,8 +36,12 @@ const mlModelName           = document.getElementById('mlModelName');
 const mlProbability         = document.getElementById('mlProbability');
 const btnReport             = document.getElementById('btnReport');
 const btnSafe               = document.getElementById('btnSafe');
+const btnOpenDashboard      = document.getElementById('btnOpenDashboard');
 
 let activeTabId = null;
+let currentUrl = '';
+let currentAnalysis = null;
+let currentRisk = null;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -145,11 +149,12 @@ function renderBreakdown(riskResult) {
     const sourceTag = item.source === 'dom'
       ? '<span class="source-tag dom-tag">PAGE</span>'
       : '<span class="source-tag url-tag">URL</span>';
+    const desc = (item.description || item.flag || 'Risk indicator').replace(/\(\+\d+\s+pts\)/, '');
     li.innerHTML = `
       <span class="reason-icon">${icon}</span>
-      <span>${item.description.replace(/\(\+\d+\s+pts\)/, '')}</span>
+      <span>${desc}</span>
       ${sourceTag}
-      <span class="pts-tag">+${item.points} pts</span>
+      <span class="pts-tag">+${item.points || 0} pts</span>
     `;
     reasonsList.appendChild(li);
   });
@@ -197,7 +202,8 @@ async function init() {
   }
 
   activeTabId = tab.id;
-  const url = tab.url;
+  currentUrl = tab.url;
+  const url = currentUrl;
 
   // Handle internal browser URLs
   if (url.startsWith('chrome://') || url.startsWith('edge://') ||
@@ -207,10 +213,12 @@ async function init() {
   }
 
   // 1. Run URL Analysis
-  const analysis = analyzeUrl(url);
+  currentAnalysis = analyzeUrl(url);
+  const analysis = currentAnalysis;
 
   // 2. Compute Transparent Risk Score
-  const risk = calculateRisk(analysis);
+  currentRisk = calculateRisk(analysis);
+  const risk = currentRisk;
 
   // 3. Render Site Info
   siteDomain.textContent = analysis.hostname || 'Unknown Target';
@@ -282,58 +290,148 @@ async function init() {
     }
   });
 
-  // ── Action Handlers ──────────────────────────────────────────────────────────
+  // Restore persisted report button state for this URL
+  if (typeof window.__pgRestoreReportState === 'function') {
+    window.__pgRestoreReportState();
+  }
+
+}
+
+// ── Action Handlers (Attached Immediately & Unconditionally) ───────────────────
+function attachActionHandlers() {
+  // Open Security Dashboard Action (always active)
+  if (btnOpenDashboard) {
+    btnOpenDashboard.addEventListener('click', (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: 'http://localhost:3000' });
+    });
+  }
 
   // Return to Safety Action
-  btnReturnSafety.addEventListener('click', async () => {
-    if (activeTabId) {
-      await chrome.tabs.update(activeTabId, { url: 'https://www.google.com' });
-      window.close();
-    }
-  });
+  if (btnReturnSafety) {
+    btnReturnSafety.addEventListener('click', async () => {
+      if (activeTabId) {
+        await chrome.tabs.update(activeTabId, { url: 'https://www.google.com' });
+        window.close();
+      }
+    });
+  }
 
   // Dismiss Safety Banner Action
-  btnProceedAnyway.addEventListener('click', () => {
-    safetyActions.classList.add('hidden');
-    bannerDesc.textContent = 'Proceeding with caution. Avoid entering sensitive passwords or payment details.';
-  });
+  if (btnProceedAnyway) {
+    btnProceedAnyway.addEventListener('click', () => {
+      safetyActions.classList.add('hidden');
+      bannerDesc.textContent = 'Proceeding with caution. Avoid entering sensitive passwords or payment details.';
+    });
+  }
 
   // Collapsible Diagnostics Accordion
-  btnToggleDiagnostics.addEventListener('click', () => {
-    const isExpanded = btnToggleDiagnostics.getAttribute('aria-expanded') === 'true';
-    btnToggleDiagnostics.setAttribute('aria-expanded', !isExpanded);
-    diagnosticCollapse.classList.toggle('collapsed', isExpanded);
-  });
+  if (btnToggleDiagnostics) {
+    btnToggleDiagnostics.addEventListener('click', () => {
+      const isExpanded = btnToggleDiagnostics.getAttribute('aria-expanded') === 'true';
+      btnToggleDiagnostics.setAttribute('aria-expanded', !isExpanded);
+      diagnosticCollapse.classList.toggle('collapsed', isExpanded);
+    });
+  }
 
-  // User Reporting Handlers
-  btnReport.addEventListener('click', () => {
+  // ── User Feedback Buttons (Report Threat / Mark Safe) ────────────────────────
+  // Both buttons are toggle-based:
+  //   First click  → send report, highlight button as active
+  //   Second click → undo report, reset button to default
+  // State is persisted in chrome.storage so it survives popup close/reopen.
+
+  function applyReportState(reportType) {
+    if (reportType === 'suspicious') {
+      btnReport.classList.add('btn-active');
+      btnReport.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+          <path d="M10 2a8 8 0 100 16A8 8 0 0010 2Zm0 4v4m0 4h.01"/>
+        </svg>
+        Reported ✓`;
+      btnSafe.classList.remove('btn-active');
+      btnSafe.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+          <path d="M7 10l2 2 4-4m3 2a8 8 0 11-16 0 8 8 0 0116 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        Mark Safe`;
+    } else if (reportType === 'safe') {
+      btnSafe.classList.add('btn-active');
+      btnSafe.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+          <path d="M7 10l2 2 4-4m3 2a8 8 0 11-16 0 8 8 0 0116 0Z"/>
+        </svg>
+        Marked Safe ✓`;
+      btnReport.classList.remove('btn-active');
+      btnReport.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+          <path d="M10 2a8 8 0 100 16A8 8 0 0010 2Zm0 4v4m0 4h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        Report Threat`;
+    } else {
+      // No report / toggled off — reset both
+      btnReport.classList.remove('btn-active');
+      btnReport.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+          <path d="M10 2a8 8 0 100 16A8 8 0 0010 2Zm0 4v4m0 4h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        Report Threat`;
+      btnSafe.classList.remove('btn-active');
+      btnSafe.innerHTML = `
+        <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+          <path d="M7 10l2 2 4-4m3 2a8 8 0 11-16 0 8 8 0 0116 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        Mark Safe`;
+    }
+  }
+
+  function sendReport(reportType) {
     chrome.runtime.sendMessage({
       type: 'USER_REPORT',
-      url,
-      domain: analysis.hostname,
-      riskScore: risk.score,
-      riskLevel: risk.level,
-      reportType: 'suspicious',
+      url: currentUrl,
+      domain: currentAnalysis?.hostname || '',
+      riskScore: currentRisk?.score || 0,
+      riskLevel: currentRisk?.level || 'UNKNOWN',
+      reportType,
+    }, (response) => {
+      if (response?.toggled) {
+        // Toggled off — undo
+        applyReportState(null);
+        if (bannerDesc) bannerDesc.textContent = 'Report removed.';
+      } else {
+        applyReportState(reportType);
+        if (bannerDesc) {
+          bannerDesc.textContent = reportType === 'suspicious'
+            ? 'Thank you! Threat report logged for community review.'
+            : 'Feedback saved! Domain noted as benign.';
+        }
+      }
     });
-    btnReport.textContent = 'Reported ✓';
-    btnReport.disabled    = true;
-    bannerDesc.textContent = 'Thank you! Threat report logged for community review.';
-  });
+  }
 
-  btnSafe.addEventListener('click', () => {
-    chrome.runtime.sendMessage({
-      type: 'USER_REPORT',
-      url,
-      domain: analysis.hostname,
-      riskScore: risk.score,
-      riskLevel: risk.level,
-      reportType: 'safe',
+  if (btnReport) {
+    btnReport.addEventListener('click', () => sendReport('suspicious'));
+  }
+
+  if (btnSafe) {
+    btnSafe.addEventListener('click', () => sendReport('safe'));
+  }
+
+  // Restore persisted button state for this URL (runs after init sets currentUrl)
+  function restoreReportState() {
+    if (!currentUrl) return;
+    chrome.runtime.sendMessage({ type: 'GET_REPORT_STATE', url: currentUrl }, (res) => {
+      if (res?.reportType) applyReportState(res.reportType);
     });
-    btnSafe.textContent = 'Marked Safe ✓';
-    btnSafe.disabled    = true;
-    bannerDesc.textContent = 'Feedback saved! Domain noted as benign.';
-  });
+  }
+
+  // Expose so init() can call it once currentUrl is known
+  window.__pgRestoreReportState = restoreReportState;
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  attachActionHandlers();
+  init().catch((err) => {
+    console.error('[PhishGuard] init error:', err);
+  });
+});

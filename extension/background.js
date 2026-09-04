@@ -247,19 +247,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'USER_REPORT') {
-    chrome.storage.local.get(['user_reports'], (res) => {
+    const { url, domain, reportType, riskScore, riskLevel } = message;
+
+    chrome.storage.local.get(['user_reports', 'user_report_states'], (res) => {
       const reports = res.user_reports || [];
-      reports.push({
-        url: message.url,
-        domain: message.domain,
-        reportType: message.reportType,
-        riskScore: message.riskScore || 0,
-        riskLevel: message.riskLevel || 'UNKNOWN',
+      const states = res.user_report_states || {};
+
+      const existingState = states[url];
+      // Toggle: if same reportType clicked again → undo (remove)
+      if (existingState === reportType) {
+        delete states[url];
+        const filtered = reports.filter(r => !(r.url === url && r.reportType === reportType));
+        chrome.storage.local.set({ user_reports: filtered, user_report_states: states });
+        
+        // Also remove from backend dashboard
+        fetch('http://localhost:5000/api/report', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        }).catch(() => {});
+        
+        sendResponse({ status: 'removed', toggled: true });
+        return;
+      }
+
+      // Remove any previous opposite report for this URL first
+      const filtered = reports.filter(r => r.url !== url);
+      filtered.push({
+        url,
+        domain,
+        reportType,
+        riskScore: riskScore || 0,
+        riskLevel: riskLevel || 'UNKNOWN',
         timestamp: Date.now()
       });
-      chrome.storage.local.set({ user_reports: reports });
+      states[url] = reportType;
+      chrome.storage.local.set({ user_reports: filtered, user_report_states: states });
+
+      // Also forward to backend so it appears on dashboard
+      fetch('http://localhost:5000/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, riskScore, riskLevel })
+      }).catch(() => {}); // Non-blocking — extension works offline too
     });
+
     sendResponse({ status: 'success' });
+    return true;
+  }
+
+  // Popup requests the saved report state for the current URL
+  if (message.type === 'GET_REPORT_STATE') {
+    chrome.storage.local.get(['user_report_states'], (res) => {
+      const states = res.user_report_states || {};
+      sendResponse({ reportType: states[message.url] || null });
+    });
     return true;
   }
 
