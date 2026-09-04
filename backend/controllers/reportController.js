@@ -51,19 +51,24 @@ async function submitReport(req, res) {
       return res.status(400).json({ success: false, error: 'Malformed URL.' });
     }
 
-    // Persist to MongoDB (Phase 7)
+    // Persist to MongoDB (Phase 7) - UPSERT to prevent duplicates for the same URL
     let saved = null;
     try {
-      saved = await Detection.create({
-        url,
-        domain,
-        riskScore:  riskScore ?? 50,
-        riskLevel:  riskLevel || 'SUSPICIOUS',
-        urlFlags,
-        domFlags,
-        reasons,
-        source: 'extension'
-      });
+      saved = await Detection.findOneAndUpdate(
+        { url },
+        {
+          $set: {
+            domain,
+            riskScore:  riskScore ?? 50,
+            riskLevel:  riskLevel || 'SUSPICIOUS',
+            urlFlags,
+            domFlags,
+            reasons,
+            source: 'extension'
+          }
+        },
+        { upsert: true, new: true }
+      );
     } catch (dbErr) {
       console.warn('[reportController] DB write skipped:', dbErr.message);
     }
@@ -78,12 +83,12 @@ async function submitReport(req, res) {
       domFlags,
       reasons,
       comment,
-      reportedAt: new Date().toISOString()
+      reportedAt: saved?.updatedAt || new Date().toISOString()
     };
 
-    console.log(`[PhishGuard] New user report: ${domain} (${riskLevel})`);
+    console.log(`[PhishGuard] User report updated: ${domain} (${riskLevel})`);
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
       message: 'Report received. Thank you for helping keep the web safe.',
       data: report
@@ -95,4 +100,20 @@ async function submitReport(req, res) {
   }
 }
 
-module.exports = { submitReport, reportValidation };
+async function removeReport(req, res) {
+  const { url } = req.body;
+  if (!url) {
+    return res.status(400).json({ success: false, error: 'url is required.' });
+  }
+  
+  try {
+    await Detection.deleteOne({ url, source: 'extension' });
+    console.log(`[PhishGuard] User report removed for: ${url}`);
+    return res.status(200).json({ success: true, message: 'Report removed.' });
+  } catch (err) {
+    console.error('[reportController] Error removing report:', err.message);
+    return res.status(500).json({ success: false, error: 'Failed to remove report.' });
+  }
+}
+
+module.exports = { submitReport, removeReport, reportValidation };

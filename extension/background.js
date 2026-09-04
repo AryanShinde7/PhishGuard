@@ -16,6 +16,67 @@ import { syncAnalysisToBackend } from './apiClient.js';
 // In-memory cache for tab evaluations
 const tabDataCache = new Map();
 
+// URLs that the user has explicitly chosen to bypass/proceed to
+const bypassedUrls = new Set();
+
+// Tabs where the popup has already automatically opened for this navigation
+const autoPoppedTabs = new Set();
+
+/**
+ * Automatically opens the extension popup when a site is classified as SUSPICIOUS
+ */
+function triggerSuspiciousPopup(tabId) {
+  if (!tabId || autoPoppedTabs.has(tabId)) return;
+  autoPoppedTabs.add(tabId);
+
+  // Set action badge to caution symbol
+  if (chrome.action && chrome.action.setBadgeText) {
+    chrome.action.setBadgeText({ text: '!', tabId }).catch(() => {});
+    chrome.action.setBadgeBackgroundColor({ color: '#f59e0b', tabId }).catch(() => {});
+  }
+
+  // Attempt to open the extension popup automatically
+  if (chrome.action && typeof chrome.action.openPopup === 'function') {
+    chrome.tabs.get(tabId).then(tab => {
+      if (tab && tab.active) {
+        chrome.action.openPopup({ windowId: tab.windowId }).catch(() => {
+          chrome.action.openPopup().catch(() => {});
+        });
+        console.log(`[PhishGuard] ⚠️ Automatically opened extension popup for SUSPICIOUS site on tab #${tabId}`);
+      }
+    }).catch(() => {
+      chrome.action.openPopup().catch(() => {});
+    });
+  }
+}
+
+/**
+ * Redirects a tab to the PhishGuard Interstitial Block Page
+ */
+function redirectToWarningPage(tabId, targetUrl, evaluation) {
+  if (!tabId || !targetUrl || bypassedUrls.has(targetUrl)) return;
+  if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) return;
+
+  const warningBase = chrome.runtime.getURL('warning.html');
+  // Avoid redirect loop if already on warning page
+  if (targetUrl.startsWith(warningBase)) return;
+
+  const score = evaluation?.risk?.score || 75;
+  const level = evaluation?.risk?.level || 'HIGH RISK';
+  const reasons = (evaluation?.risk?.breakdown || []).map(b => b.description || b.flag);
+
+  const warningUrl = `${warningBase}?url=${encodeURIComponent(targetUrl)}` +
+    `&score=${encodeURIComponent(score)}` +
+    `&level=${encodeURIComponent(level)}` +
+    `&reasons=${encodeURIComponent(JSON.stringify(reasons))}`;
+
+  console.warn(`[PhishGuard] 🚨 INTERCEPTING HIGH RISK SITE #${tabId}: ${targetUrl} (Score: ${score})`);
+
+  chrome.tabs.update(tabId, { url: warningUrl }).catch(err => {
+    console.warn('[PhishGuard] Failed to redirect tab to warning page:', err);
+  });
+}
+
 /**
  * Evaluate a tab URL combined with any cached DOM signals.
  */
@@ -33,16 +94,38 @@ function evaluateTabUrl(url, domSignals = null) {
   };
 }
 
-// ── Tab navigated: run URL-only analysis locally, do NOT call backend yet ─────
-// Backend is called after DOM signals arrive so the ML model gets real features.
+// ── Tab navigated: run URL-only analysis locally, intercept if HIGH RISK or popup if SUSPICIOUS ───────
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url) {
-    if (tab.url.startsWith('http://') || tab.url.startsWith('https://')) {
-      // Reset DOM signals on navigation — stale DOM from previous page must not bleed over
-      const evaluation = evaluateTabUrl(tab.url, null);
-      tabDataCache.set(tabId, { ...evaluation, domSignals: null, backendResult: null });
-      console.log(`[PhishGuard] #${tabId} → ${evaluation.domain} | Local heuristic: ${evaluation.risk.score} (${evaluation.risk.level})`);
-      // Backend NOT called here — DOM signals unavailable at this point.
+  const currentUrl = changeInfo.url || tab.url;
+  if (!currentUrl) return;
+
+  // Reset auto-pop flag on new navigation
+  if (changeInfo.url) {
+    autoPoppedTabs.delete(tabId);
+    if (chrome.action && chrome.action.setBadgeText) {
+      chrome.action.setBadgeText({ text: '', tabId }).catch(() => {});
+    }
+  }
+
+  // Only check standard HTTP/HTTPS navigations
+  if (!currentUrl.startsWith('http://') && !currentUrl.startsWith('https://')) return;
+
+  // Ignore if user explicitly bypassed this destination
+  if (bypassedUrls.has(currentUrl)) return;
+
+  // Evaluate URL heuristic flags as early as possible
+  if (changeInfo.status === 'loading' || changeInfo.status === 'complete') {
+    const evaluation = evaluateTabUrl(currentUrl, null);
+    tabDataCache.set(tabId, { ...evaluation, domSignals: null, backendResult: null });
+
+    console.log(`[PhishGuard] #${tabId} → ${evaluation.domain} | Local heuristic: ${evaluation.risk.score} (${evaluation.risk.level})`);
+
+    // Automatic Interception: If classified as HIGH RISK, block immediately
+    if (evaluation.risk.level === 'HIGH RISK') {
+      redirectToWarningPage(tabId, currentUrl, evaluation);
+    } else if (evaluation.risk.level === 'SUSPICIOUS' && changeInfo.status === 'complete') {
+      // Automatic Popup: If classified as SUSPICIOUS, pop up the extension automatically!
+      triggerSuspiciousPopup(tabId);
     }
   }
 });
@@ -50,10 +133,43 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Tab closed — cleanup cache
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabDataCache.delete(tabId);
+  autoPoppedTabs.delete(tabId);
 });
 
 // ── Central Message Hub ────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+
+  // Bypass warning request from warning.html
+  if (message.type === 'BYPASS_WARNING') {
+    const { url } = message;
+    if (url) {
+      bypassedUrls.add(url);
+      console.log(`[PhishGuard] User bypassed warning for: ${url}`);
+    }
+    sendResponse({ status: 'ok', bypassed: true });
+    return true;
+  }
+
+  // Request warning data from warning.html
+  if (message.type === 'GET_WARNING_DATA') {
+    const { url } = message;
+    let evalData = null;
+
+    if (url) {
+      for (const [, entry] of tabDataCache) {
+        if (entry.url === url) {
+          evalData = entry;
+          break;
+        }
+      }
+      if (!evalData) {
+        evalData = evaluateTabUrl(url, null);
+      }
+    }
+
+    sendResponse({ status: 'ok', evaluation: evalData });
+    return true;
+  }
 
   // Popup / popup.js requests current evaluation for this tab
   if (message.type === 'ANALYZE_URL') {
@@ -103,6 +219,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             // Push updated badge to popup if it's open
             chrome.runtime.sendMessage({ type: 'BACKEND_SCORE_UPDATE', tabId, data: br }).catch(() => {});
+
+            // If backend ML + DOM analysis elevated this site to HIGH RISK, intercept tab now
+            if (br.riskLevel === 'HIGH RISK' && !bypassedUrls.has(existing.url)) {
+              redirectToWarningPage(tabId, existing.url, {
+                ...merged,
+                risk: {
+                  ...merged.risk,
+                  score: br.riskScore,
+                  level: br.riskLevel,
+                  mlAnalysis: br.mlAnalysis
+                }
+              });
+            } else if (br.riskLevel === 'SUSPICIOUS' || merged.risk.level === 'SUSPICIOUS') {
+              // If classified as SUSPICIOUS, automatically pop up extension!
+              triggerSuspiciousPopup(tabId);
+            }
           }
         }).catch(() => {});
 
@@ -115,19 +247,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'USER_REPORT') {
-    chrome.storage.local.get(['user_reports'], (res) => {
+    const { url, domain, reportType, riskScore, riskLevel } = message;
+
+    chrome.storage.local.get(['user_reports', 'user_report_states'], (res) => {
       const reports = res.user_reports || [];
-      reports.push({
-        url: message.url,
-        domain: message.domain,
-        reportType: message.reportType,
-        riskScore: message.riskScore || 0,
-        riskLevel: message.riskLevel || 'UNKNOWN',
+      const states = res.user_report_states || {};
+
+      const existingState = states[url];
+      // Toggle: if same reportType clicked again → undo (remove)
+      if (existingState === reportType) {
+        delete states[url];
+        const filtered = reports.filter(r => !(r.url === url && r.reportType === reportType));
+        chrome.storage.local.set({ user_reports: filtered, user_report_states: states });
+        
+        // Also remove from backend dashboard
+        fetch('http://localhost:5000/api/report', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        }).catch(() => {});
+        
+        sendResponse({ status: 'removed', toggled: true });
+        return;
+      }
+
+      // Remove any previous opposite report for this URL first
+      const filtered = reports.filter(r => r.url !== url);
+      filtered.push({
+        url,
+        domain,
+        reportType,
+        riskScore: riskScore || 0,
+        riskLevel: riskLevel || 'UNKNOWN',
         timestamp: Date.now()
       });
-      chrome.storage.local.set({ user_reports: reports });
+      states[url] = reportType;
+      chrome.storage.local.set({ user_reports: filtered, user_report_states: states });
+
+      // Also forward to backend so it appears on dashboard
+      fetch('http://localhost:5000/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, riskScore, riskLevel })
+      }).catch(() => {}); // Non-blocking — extension works offline too
     });
+
     sendResponse({ status: 'success' });
+    return true;
+  }
+
+  // Popup requests the saved report state for the current URL
+  if (message.type === 'GET_REPORT_STATE') {
+    chrome.storage.local.get(['user_report_states'], (res) => {
+      const states = res.user_report_states || {};
+      sendResponse({ reportType: states[message.url] || null });
+    });
     return true;
   }
 

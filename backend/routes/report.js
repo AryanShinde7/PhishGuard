@@ -3,7 +3,7 @@
  */
 const express  = require('express');
 const router   = express.Router();
-const { submitReport, reportValidation } = require('../controllers/reportController');
+const { submitReport, removeReport, reportValidation } = require('../controllers/reportController');
 
 /**
  * @route  POST /api/report
@@ -12,5 +12,13 @@ const { submitReport, reportValidation } = require('../controllers/reportControl
  * @access Public
  */
 router.post('/', reportValidation, submitReport);
+
+/**
+ * @route  DELETE /api/report
+ * @desc   Remove a user-reported phishing URL (untoggle)
+ * @body   { url: string }
+ * @access Public
+ */
+router.delete('/', removeReport);
 
 module.exports = router;
